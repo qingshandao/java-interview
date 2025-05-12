@@ -333,8 +333,8 @@ Java 中的注释有三种：
 > ⚠️**注意：**
 >
 > - 对于静态成员变量（无论是基本类型还是引用类型）
->   - 在 JDK 8 及之前版本：存放在 方法区（Method Area）
->   - 在 JDK 8 之后（如 JDK 11）：方法区被废弃，由 元空间（Metaspace） 取代，静态变量保存在类元信息区域的静态变量表中，但本质仍与类信息绑定，而非堆。
+>   - 在 JDK 7 及之前版本：存放在 方法区（Method Area）
+>   - 在 JDK 8 及之后：方法区被废弃，由 元空间（Metaspace） 取代，静态变量保存在类元信息区域的静态变量表中，但本质仍与类信息绑定，而非堆。
 
 **占用空间**：相比于包装类型（对象类型）， 基本数据类型占用的空间往往非常小。
 
@@ -356,3 +356,184 @@ System.out.println(a == b);         // false
 System.out.println(a.equals(b));    // true
 ```
 
+**为什么说是几乎所有对象实例都存在于堆中呢？**
+
+🆘🆘🆘因为 HotSpot 虚拟机引入了 JIT 优化之后，会对对象进行逃逸分析，如果发现某一个对象并没有逃逸到方法外部，那么就可能通过标量替换来实现栈上分配，而避免堆上分配内存。
+
+⚠️ 注意：**基本数据类型存放在栈中是一个常见的误区！** **基本数据类型** 的存储位置取决于它们的作用域和声明方式。如果它们是局部变量，那么它们会存放在栈【局部变量】中；如果它们是成员变量，那么它们会存放在堆【成员变量】/方法区/元空间中【static】。
+
+```java
+public class Test {
+    // 成员变量，存放在堆中
+    int a = 10;
+    // 被 static 修饰的成员变量，JDK 1.7 及之前位于方法区，1.8 后存放于元空间，均不存放于堆中。
+    // 变量属于类，不属于对象。
+    static int b = 20;
+
+    public void method() {
+        // 局部变量，存放在栈中
+        int c = 30;
+        static int d = 40; // 编译错误，不能在方法中使用 static 修饰局部变量
+    }
+}
+```
+
+
+
+## 3、包装类型的缓存机制了解么？
+
+Java 基本数据类型的包装类型的大部分都用到了缓存机制来 **提升性能**。
+
+- `Byte`,`Short`,`Integer`,`Long` 这 4 种包装类默认创建了数值 **[-128，127]** 的相应类型的缓存数据
+
+- `Character` 创建了数值在 **[0,127]** 范围的缓存数据，
+
+- `Boolean` 直接返回 `TRUE` or `FALSE`。
+
+- 两种浮点数类型的包装类 `Float`,`Double` 并 **没有** 实现缓存机制
+
+  ```java
+  Integer i1 = 33;
+  Integer i2 = 33;
+  System.out.println(i1 == i2);// 输出 true
+  
+  Float i11 = 333f;
+  Float i22 = 333f;
+  System.out.println(i11 == i22);// 输出 false
+  
+  Double i3 = 1.2;
+  Double i4 = 1.2;
+  System.out.println(i3 == i4);// 输出 false
+  
+  Integer i1 = 40;	// 使用缓存对象，装箱，等价于 Integer i1=Integer.valueOf(40)
+  Integer i2 = new Integer(40);	// 创建新对象
+  System.out.println(i1==i2);	// 输出false
+  ```
+
+  
+
+ `Integer`，可以通过 JVM 参数 `-XX:AutoBoxCacheMax=<size>` 修改缓存上限，但不能修改下限 -128。实际使用时，并不建议设置过大的值，避免浪费内存，甚至是 OOM。
+
+对于`Byte`,`Short`,`Long` ,`Character` 没有类似 `-XX:AutoBoxCacheMax` 参数可以修改，因此缓存范围是固定的，无法通过 JVM 参数调整。`Boolean` 则直接返回预定义的 `TRUE` 和 `FALSE` 实例，没有缓存范围的概念。
+
+**`Integer` 缓存源码：**
+
+```java
+public static Integer valueOf(int i) {
+    if (i >= IntegerCache.low && i <= IntegerCache.high)
+        return IntegerCache.cache[i + (-IntegerCache.low)];
+    return new Integer(i);
+}
+private static class IntegerCache {
+    static final int low = -128;
+    static final int high;
+    static {
+        // high value may be configured by property
+        int h = 127;
+    }
+}
+```
+
+**`Character` 缓存源码:**
+
+```java
+public static Character valueOf(char c) {
+    if (c <= 127) { // must cache
+      return CharacterCache.cache[(int)c];
+    }
+    return new Character(c);
+}
+
+private static class CharacterCache {
+    private CharacterCache(){}
+    static final Character cache[] = new Character[127 + 1];
+    static {
+        for (int i = 0; i < cache.length; i++)
+            cache[i] = new Character((char)i);
+    }
+
+}
+```
+
+**`Boolean` 缓存源码：**
+
+```java
+public static Boolean valueOf(boolean b) {
+    return (b ? TRUE : FALSE);
+}
+```
+
+如果超出对应范围仍然会去创建新的对象，缓存的范围区间的大小只是在性能和资源之间的权衡
+
+## 4、自动装箱与拆箱了解吗？原理是什么？
+
+### **什么是自动拆装箱？**
+
+- **装箱**：将基本类型用它们对应的引用类型包装起来；
+- **拆箱**：将包装类型转换为基本数据类型；
+
+举例：
+
+```java
+Integer i = 10;  //装箱
+int n = i;   //拆箱
+
+
+Integer integer = Integer.valueOf(1);   // 装箱
+int i = integer.intValue();             // 拆箱
+```
+
+上面这两行代码对应的字节码为：
+
+```java
+   L1
+
+    LINENUMBER 8 L1
+
+    ALOAD 0
+
+    BIPUSH 10
+
+    INVOKESTATIC java/lang/Integer.valueOf (I)Ljava/lang/Integer;
+
+    PUTFIELD AutoBoxTest.i : Ljava/lang/Integer;
+
+   L2
+
+    LINENUMBER 9 L2
+
+    ALOAD 0
+
+    ALOAD 0
+
+    GETFIELD AutoBoxTest.i : Ljava/lang/Integer;
+
+    INVOKEVIRTUAL java/lang/Integer.intValue ()I
+
+    PUTFIELD AutoBoxTest.n : I
+
+    RETURN
+```
+
+从字节码中，我们发现装箱其实就是调用了 包装类的`valueOf()`方法，拆箱其实就是调用了 `xxxValue()`方法。
+
+因此，
+
+- `Integer i = 10` 等价于 `Integer i = Integer.valueOf(10)`
+- `int n = i` 等价于 `int n = i.intValue()`;
+
+注意：**如果频繁拆装箱的话，也会严重影响系统的性能。我们应该尽量避免不必要的拆装箱操作。**
+
+```java
+private static long sum() {
+    // 应该使用 long 而不是 Long
+    Long sum = 0L;
+    for (long i = 0; i <= Integer.MAX_VALUE; i++)
+        sum += i;
+    return sum;
+}
+```
+
+## 5、为什么浮点数运算的时候会有精度丢失的风险？
+
+这个和计算机保存浮点数的机制有很大关系。我们知道计算机是二进制的，而且计算机在表示一个数字时，宽度是有限的，无限循环的小数存储在计算机时，只能被截断，所以就会导致小数精度发生损失的情况。这也就是解释了为什么浮点数没有办法用二进制精确表示。
