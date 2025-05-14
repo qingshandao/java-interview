@@ -178,26 +178,26 @@ Java 中的注释有三种：
 >   interface MyInterface {
 >       // 抽象方法（必须由实现类实现）
 >       void abstractMethod();
->   
+>     
 >       // 默认方法（可以被实现类继承或重写）
 >       default void defaultMethod() {
 >           System.out.println("这是接口中的默认方法");
 >       }
 >   }
->   
+>     
 >   class MyClass implements MyInterface {
 >       @Override
 >       public void abstractMethod() {
 >           System.out.println("实现了抽象方法");
 >       }
->   
+>     
 >       // 可选：重写默认方法
 >       @Override
 >       public void defaultMethod() {
 >           System.out.println("重写了默认方法");
 >       }
 >   }
->   
+>     
 >   public class Main {
 >       public static void main(String[] args) {
 >           MyInterface obj = new MyClass();
@@ -205,7 +205,7 @@ Java 中的注释有三种：
 >           obj.defaultMethod();    // 输出：重写了默认方法
 >       }
 >   }
->   
+>     
 >   ```
 >
 >   
@@ -859,7 +859,7 @@ public class StringExample {
     >           System.out.println("Parent instance");
     >       }
     >   }
-    >   
+    >     
     >   class Child extends Parent {
     >       public static void staticMethod() {
     >           System.out.println("Child static");
@@ -869,7 +869,7 @@ public class StringExample {
     >           System.out.println("Child instance");
     >       }
     >   }
-    >   
+    >     
     >   public class Test {
     >       public static void main(String[] args) {
     >           Parent p = new Child();
@@ -877,7 +877,7 @@ public class StringExample {
     >           p.instanceMethod();   // 输出：Child instance ← 这是实例方法重写，多态行为
     >       }
     >   }
-    >   
+    >     
     >   ```
 
   - 被 `final` 修饰的方法就**不能**在子类中再次声明，但是**能**进行重载
@@ -896,7 +896,7 @@ public class StringExample {
     >           System.out.println("Parent says hi");
     >       }
     >   }
-    >   
+    >     
     >   class Child extends Parent {
     >       // ❌ 编译错误：Cannot override the final method from Parent
     >       public void sayHi() {
@@ -911,13 +911,13 @@ public class StringExample {
     >           System.out.println("Parent says hi");
     >       }
     >   }
-    >   
+    >     
     >   class Child extends Parent {
     >       public void sayHi(String name) {  // ✅ 合法：方法重载，不是重写
     >           System.out.println("Hi, " + name);
     >       }
     >   }
-    >   
+    >     
     >   ```
     >
     >   
