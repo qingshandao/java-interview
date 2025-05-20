@@ -747,3 +747,619 @@ public class DebugInvocationHandler implements InvocationHandler {
 }
 ```
 
+另外，像 Java 中的一大利器 **注解** 的实现也用到了反射。
+
+为什么你使用 Spring 的时候 ，一个`@Component`注解就声明了一个类为 Spring Bean 呢？为什么你通过一个 `@Value`注解就读取到配置文件中的值呢？究竟是怎么起作用的呢？
+
+这些都是因为你可以基于反射分析类，然后获取到类/属性/方法/方法的参数上的注解。你获取到注解之后，就可以做进一步的处理
+
+# 四、注解
+
+## 1、何谓注解？
+
+`Annotation` （注解） 是 Java5 开始引入的新特性，可以看作是一种特殊的注释，主要用于修饰类、方法或者变量，提供某些信息供程序在编译或者运行时使用。
+
+注解本质是一个继承了`Annotation` 的特殊接口：
+
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.SOURCE)
+public @interface Override {
+
+}
+
+public interface Override extends Annotation{
+
+}
+```
+
+JDK 提供了很多内置的注解（比如 `@Override`、`@Deprecated`），同时，我们还可以自定义注解。
+
+## 2、注解的解析方法有哪几种？
+
+- **编译期直接扫描**：编译器在编译 Java 代码的时候扫描对应的注解并处理，比如某个方法使用`@Override` 注解，编译器在编译的时候就会检测当前的方法是否重写了父类对应的方法。
+
+- **运行期通过反射处理**：像框架中自带的注解(比如 Spring 框架的 `@Value`、`@Component`)都是通过反射来进行处理的
+
+## 3、元注解
+
+### （1）`@Target`
+
+定义注解可以被用在哪些位置上。
+
+```java
+@Target({ElementType.TYPE, ElementType.METHOD})
+```
+
+📌常见的 `ElementType` 值：的
+
+| 枚举值            | 说明                    |
+| ----------------- | ----------------------- |
+| `TYPE`            | 类、接口、枚举          |
+| `FIELD`           | 成员变量                |
+| `METHOD`          | 方法                    |
+| `PARAMETER`       | 方法参数                |
+| `CONSTRUCTOR`     | 构造方法                |
+| `LOCAL_VARIABLE`  | 局部变量                |
+| `ANNOTATION_TYPE` | 注解定义上              |
+| `PACKAGE`         | 包                      |
+| `TYPE_PARAMETER`  | 泛型类型参数（Java 8+） |
+| `TYPE_USE`        | 类型使用位置（Java 8+） |
+
+### （2）`@Retention`
+
+指定注解保留到哪个阶段。
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+```
+
+📌常见的 `RetentionPolicy` 枚举值：
+
+| 枚举值    | 说明                                             |
+| --------- | ------------------------------------------------ |
+| `SOURCE`  | 仅保留在源码中，编译后会被丢弃（如 `@Override`） |
+| `CLASS`   | 编译进 `.class` 文件，但运行时不可见（默认）     |
+| `RUNTIME` | 编译进 `.class`，运行时可通过反射访问            |
+
+⚠ **注：**AOP 和 自定义校验 必须用 `RUNTIME`，否则运行时无法读取注解。
+
+### （3）`@Documented`
+
+表示该注解会被包含在 Javadoc 中。
+
+```java
+@Documented
+```
+
+- 默认注解不会出现在生成的 Javadoc 文档中
+
+- 加上它之后，标注这个注解的类/方法/字段，其文档会包含注解描述
+
+📌使用案例：
+
+```bash
+javadoc -encoding UTF-8 -charset UTF-8 -private -d doc Person.java NotBlank.java
+```
+
+- 指定编码格式
+
+- 需要生成 `private` 的字段和方法（默认生成的文档不会生成 `private`）
+
+- 指定使用注解的类 和 注解类
+
+  > ⚠注：必须和注解类（如 NotBlank.java）一起生成文档，否则注解不会出现在文档中
+
+![](./assets/annotation_in_doc.png)
+
+### （4）`@Inherited`
+
+允许子类继承父类的注解（仅限用于类 @Target(ElementType.TYPE)）
+
+```java
+@Inherited
+```
+
+- 用于定义注解时，表明该注解可以被子类自动继承
+
+- ⚠ 只对类生效，对字段、方法无效
+
+📌 示例：
+
+```java
+@Inherited
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface MyAnnotation {}
+```
+
+### （5） `@Repeatable`（Java 8+）
+
+允许在同一个位置多次使用同一个注解。
+
+```java
+@Repeatable(Roles.class)
+```
+
+- ⚠ 需要额外定义一个容器注解类
+
+- 示例：
+
+  ```java
+  @Repeatable(Roles.class)
+  public @interface Role {
+      String value();
+  }
+  
+  /**
+  * 容器注解类
+  */
+  @Target(ElementType.TYPE)
+  @Retention(RetentionPolicy.RUNTIME)
+  public @interface Roles {
+      Role[] value();
+  }
+  
+  ```
+
+  - 使用方式：
+
+    ```java
+    @Role("admin")
+    @Role("user")
+    public class MyClass {}
+    ```
+
+    
+
+## 4、自定义注解案例
+
+### （1）校验参数注解：@NotBlank【<u>反射</u> 实现】
+
+- 注解定义
+
+  ```java
+  @Target(ElementType.FIELD)
+  @Retention(RetentionPolicy.RUNTIME)
+  @Documented
+  public @interface NotBlank {
+      String message() default "字段不能为空";
+  }
+  ```
+
+- 使用方式
+
+  ```java
+  public class UserDTO {
+      /**
+       * 人名，不能为空
+       */
+      @NotBlank(message = "用户名不能为空")
+      private String username;
+  
+      /**
+       * 年龄，可以为空
+       */
+      private String email;
+  }
+  ```
+
+- 校验工具类（可在控制器或服务里调用）
+
+  ```java
+  public class ValidatorUtil {
+      public static void validate(Object obj) throws IllegalAccessException {
+          // 用于获取对象 obj 所属类中定义的所有字段（成员变量）
+          for (Field field : obj.getClass().getDeclaredFields()) {
+              field.setAccessible(true);	// 关闭 Java 语言访问检查机制（如 private 限制），允许访问字段或方法
+              Object value = field.get(obj);	// 获取对象 obj 上指定字段的值
+  
+              NotBlank notBlank = field.getAnnotation(NotBlank.class);
+              if (notBlank != null && (value == null || value.toString().trim().isEmpty())) {
+                  throw new IllegalArgumentException(notBlank.message());
+              }
+          }
+      }
+  }
+  
+  ```
+
+- 运行测试类
+
+  ```java
+  public class Test {
+      public static void main(String[] args) {
+          UserDTO user = new UserDTO();
+  
+          try {
+              ValidatorUtil.validate(user);
+          } catch (IllegalAccessException e) {
+              throw new RuntimeException(e);
+          }
+      }
+  }
+  ```
+
+
+
+- 运行结果
+
+  ```java
+  Exception in thread "main" java.lang.IllegalArgumentException: 用户名不能为空
+  	at com.gc.annotation.ValidatorUtil.validate(ValidatorUtil.java:13)
+  	at com.gc.annotation.test.main(test.java:8)
+  ```
+
+### （2）权限校验注解：@RequireRole【 <u>Spring AOP</u> 实现】
+
+- 定义注解
+
+  ```java
+  @Target(ElementType.METHOD)
+  @Retention(RetentionPolicy.RUNTIME)
+  @Documented
+  public @interface RequireRole {
+      String value(); // 例如 "admin"
+  }
+  ```
+
+- 定义切面
+
+  ```java
+  @Aspect
+  @Component
+  public class RoleAspect {
+      @Around("@annotation(requireRole)")
+      public Object checkRole(ProceedingJoinPoint joinPoint, RequireRole requireRole) throws Throwable {
+          String currentUserRole = getCurrentUserRole(); // 模拟：实际可从SecurityContext中取
+  
+          if (!requireRole.value().equals(currentUserRole)) {
+              throw new SecurityException("没有权限，需角色: " + requireRole.value());
+          }
+          return joinPoint.proceed();
+      }
+  
+      private String getCurrentUserRole() {
+          return "user"; // 模拟：返回当前登录用户的角色
+      }
+  }
+  ```
+
+- 使用注解
+
+  ```java
+  @Service
+  public class UserService {
+  
+      // 通过 权限注解 判断是否有权限
+      @RequireRole("admin")
+      public void deleteUser(Long id) {
+          System.out.println("执行删除用户：" + id);
+      }
+  }
+  ```
+
+- 测试
+
+  ```java
+  public class AOP {
+  
+      @Autowired
+      private UserService userService;
+  
+      @Test
+      public void testAnnotation(){
+          userService.deleteUser(1l);
+      }
+  }
+  ```
+
+- 输出结果
+
+  ```java
+  java.lang.SecurityException: 没有权限，需角色: admin
+  ```
+
+
+
+# 五、SPI（简介）
+
+## 1、何谓 SPI?
+
+SPI 即 Service Provider Interface ，字面意思就是：“服务提供者的接口”，我的理解是：专门提供给服务提供者或者扩展框架功能的开发者去使用的一个接口。
+
+SPI 将服务接口和具体的服务实现分离开来，将服务调用方和服务实现者解耦，能够提升程序的扩展性、可维护性。修改或者替换服务实现并不需要修改调用方。
+
+很多框架都使用了 Java 的 SPI 机制，比如：Spring 框架、数据库加载驱动、日志接口、以及 Dubbo 的扩展实现等等。
+
+<img src="./assets/SPI_example.jpeg" style="zoom:50%;" />
+
+## 2、SPI 和 API 有什么区别？
+
+说到 SPI 就不得不说一下 API（Application Programming Interface） 了，从广义上来说它们都属于接口，而且很容易混淆。下面先用一张图说明一下：
+
+![](./assets/spi-vs-api.png)
+
+一般模块之间都是通过接口进行通讯，因此我们在服务调用方和服务实现方（也称服务提供者）之间引入一个“接口”。
+
+- 当实现方提供了接口和实现，我们可以通过调用实现方的接口从而拥有实现方给我们提供的能力，这就是 **API**。这种情况下，接口和实现都是放在实现方的包中。调用方通过接口调用实现方的功能，而不需要关心具体的实现细节。
+- 当接口存在于调用方这边时，这就是 **SPI** 。由接口调用方确定接口规则，然后由不同的厂商根据这个规则对这个接口进行实现，从而提供服务。
+
+举个通俗易懂的例子：公司 H 是一家科技公司，新设计了一款芯片，然后现在需要量产了，而市面上有好几家芯片制造业公司，这个时候，只要 H 公司指定好了这芯片生产的标准（定义好了接口标准），那么这些合作的芯片公司（服务提供者）就按照标准交付自家特色的芯片（提供不同方案的实现，但是给出来的结果是一样的）。
+
+## 3、SPI 的优缺点？
+
+通过 SPI 机制能够大大地提高接口设计的灵活性，但是 SPI 机制也存在一些缺点，比如：
+
+### （1）需要遍历加载所有的实现类，不能做到按需加载，这样效率还是相对较低的。
+
+📌 示例：
+
+- 调用方接口：
+
+  ```java
+  public interface PaymentService {
+      void pay(double amount);
+  }
+  ```
+
+- 实现方的实现类1：
+
+  ```java
+  public class AlipayService implements PaymentService {
+      @Override
+      public void pay(double amount) {
+          System.out.println("Alipay paid: " + amount);
+      }
+  }
+  ```
+
+- 实现方的实现类1：
+
+  ```java
+  public class WeChatPayService implements PaymentService {
+      @Override
+      public void pay(double amount) {
+          System.out.println("WeChat Pay paid: " + amount);
+      }
+  }
+  ```
+
+- META-INF/services/路径下创建配置文件（内容如下）
+
+  ```java
+  com.gc.spi.AlipayService
+  com.gc.spi.WeChatPayService
+  ```
+
+  ![](./assets/spi_config_class.png)
+
+- 加载类
+
+  ```java
+  public class test {
+      public static void main(String[] args) {
+          // 读取配置文件中的实现类
+          ServiceLoader<PaymentService> loader = ServiceLoader.load(PaymentService.class);
+          for (PaymentService service : loader) {
+              service.pay(100);
+          }
+      }
+  }
+  ```
+
+✅ 可以自己构建懒加载逻辑或用一些替代机制，比如 Spring 的 @ConditionalOnProperty + 自动配置方式；也可以读取 SPI 配置文件内容，自行反射创建指定实现类。
+
+
+
+### （2）当多个 `ServiceLoader` 同时 `load` 时，会有并发问题。
+
+✅ 背景说明：
+ServiceLoader 的内部机制是非线程安全的 —— 多个线程同时加载同一个 ServiceLoader 对象，可能会发生竞态条件或重复加载等问题。
+
+✅ 案例：
+
+```java
+public class ServiceLoaderThreadTest implements Runnable {
+    @Override
+    public void run() {
+        ServiceLoader<PaymentService> loader = ServiceLoader.load(PaymentService.class);
+        for (PaymentService service : loader) {
+            System.out.println(Thread.currentThread().getName() + " -> " + service.getClass().getName());
+        }
+    }
+
+    public static void main(String[] args) {
+        Thread t1 = new Thread(new ServiceLoaderThreadTest(), "T1");
+        Thread t2 = new Thread(new ServiceLoaderThreadTest(), "T2");
+
+        t1.start();
+        t2.start();
+    }
+}
+
+```
+
+⚠️ **问题**：
+多个线程会：
+
+- 同时访问 ServiceLoader 内部的迭代器状态（非线程安全）
+- 可能导致部分实现类加载失败、重复加载
+- 抛出 ConcurrentModificationException（极端情况下）
+
+✅ 解决方案：
+方法一：使用 线程本地变量
+
+```java
+public class Main {
+
+    // 避免并发问题：每个线程一个 ServiceLoader 实例
+    private static final ThreadLocal<ServiceLoader<PaymentService>> loaderThreadLocal =
+            ThreadLocal.withInitial(() -> ServiceLoader.load(PaymentService.class));
+
+    public static void main(String[] args) {
+        // 模拟多个线程调用 SPI 接口
+        Runnable task = () -> {
+            ServiceLoader<PaymentService> loader = loaderThreadLocal.get();
+            for (PaymentService service : loader) {
+                System.out.println(Thread.currentThread().getName() + " 调用：");
+                service.pay();
+            }
+        };
+
+        // 启动两个线程测试线程隔离加载
+        Thread t1 = new Thread(task, "线程A");
+        Thread t2 = new Thread(task, "线程B");
+
+        t1.start();
+        t2.start();
+    }
+}
+```
+
+🔒 说明
+
+- `ThreadLocal<ServiceLoader<PaymentService>>`  保证每个线程有自己的 ServiceLoader，避免并发加载同一配置资源时的线程安全问题。
+- `META-INF/services/com.example.PaymentService` 是 SPI 的配置文件，列出所有实现类。
+
+- 每个线程都可以独立、安全地使用这些服务实现。
+
+
+
+方法二：在调用前加锁（适用于单例 ServiceLoader）
+
+```java
+synchronized (ServiceLoader.class) {
+    ServiceLoader<PaymentService> loader = ServiceLoader.load(PaymentService.class);
+    for (PaymentService service : loader) {
+        // ...
+    }
+}
+
+```
+
+方法三：放弃 ServiceLoader，用 Spring 的依赖注入或自定义注册机制来实现
+
+
+
+# 六、序列化和反序列化（简介）
+
+## 1、什么是序列化?什么是反序列化?
+
+如果我们需要持久化 Java 对象比如将 Java 对象保存在文件中，或者在网络传输 Java 对象，这些场景都需要用到序列化。
+
+简单来说：
+
+- **序列化**：将数据结构或对象转换成可以存储或传输的形式，通常是二进制字节流，也可以是 JSON, XML 等文本格式
+- **反序列化**：将在序列化过程中所生成的数据转换为原始数据结构或者对象的过程
+
+对于 Java 这种面向对象编程语言来说，我们序列化的都是对象（Object）也就是实例化后的类(Class)，但是在 C++这种半面向对象的语言中，struct(结构体)定义的是数据结构类型，而 class 对应的是对象类型。
+
+下面是序列化和反序列化常见应用场景：
+
+- 对象在进行网络传输（比如远程方法调用 RPC 的时候）之前需要先被序列化，接收到序列化的对象之后需要再进行反序列化；
+- 将对象存储到文件之前需要进行序列化，将对象从文件中读取出来需要进行反序列化；
+- 将对象存储到数据库（如 Redis）之前需要用到序列化，将对象从缓存数据库中读取出来需要反序列化；
+- 将对象存储到内存之前需要进行序列化，从内存中读取出来之后需要进行反序列化。
+
+维基百科是如是介绍序列化的：
+
+> **序列化**（serialization）在计算机科学的数据处理中，是指将数据结构或对象状态转换成可取用格式（例如存成文件，存于缓冲，或经由网络中发送），以留待后续在相同或另一台计算机环境中，能恢复原先状态的过程。依照序列化格式重新获取字节的结果时，可以利用它来产生与原始对象相同语义的副本。对于许多对象，像是使用大量引用的复杂对象，这种序列化重建的过程并不容易。面向对象中的对象序列化，并不概括之前原始对象所关系的函数。这种过程也称为对象编组（marshalling）。从一系列字节提取数据结构的反向操作，是反序列化（也称为解编组、deserialization、unmarshalling）。
+
+综上：**序列化的主要目的是通过网络传输对象或者说是将对象存储到文件系统、数据库、内存中。**
+
+![](./assets/serialization_interview.png)
+
+## 2、序列化协议对应于 TCP/IP 4 层模型的哪一层？
+
+我们知道网络通信的双方必须要采用和遵守相同的协议。TCP/IP 四层模型是下面这样的，序列化协议属于哪一层呢？
+
+1. 应用层
+2. 传输层
+3. 网络层
+4. 网络接口层
+
+![](./assets/tcp-ip-4-model.png)
+
+如上图所示，OSI 七层协议模型中，表示层做的事情主要就是对应用层的用户数据进行处理转换为二进制流。反过来的话，就是将二进制流转换成应用层的用户数据。这不就对应的是序列化和反序列化么？
+
+因为，OSI 七层协议模型中的应用层、表示层和会话层对应的都是 TCP/IP 四层模型中的应用层，所以序列化协议属于 TCP/IP 协议应用层的一部分。
+
+## 3、如果有些字段不想进行序列化怎么办？
+
+对于不想进行序列化的变量，使用 `transient` 关键字修饰。
+
+`transient` 关键字的作用是：阻止实例中那些用此关键字修饰的的变量序列化；当对象被反序列化时，被 `transient` 修饰的变量值不会被持久化和恢复。
+
+关于 `transient` 还有几点注意：
+
+- `transient` 只能修饰变量，不能修饰类和方法。
+- `transient` 修饰的变量，在反序列化后，变量值将会被置成类型的默认值。例如，如果是修饰 `int` 类型，那么反序列后结果就是 `0`。
+- `static` 变量因为不属于任何对象(Object)，所以无论有没有 `transient` 关键字修饰，均不会被序列化。
+
+## 4、常见序列化协议有哪些？
+
+JDK 自带的序列化方式一般不会用 ，因为序列化效率低并且存在安全问题。比较常用的序列化协议有 Hessian、Kryo、Protobuf、ProtoStuff，这些都是基于二进制的序列化协议。
+
+像 JSON 和 XML 这种属于文本类序列化方式。虽然可读性比较好，但是性能较差，一般不会选择。
+
+## 5、为什么不推荐使用 JDK 自带的序列化？
+
+我们很少或者说几乎不会直接使用 JDK 自带的序列化方式，主要原因有下面这些原因：
+
+- **不支持跨语言调用** : 如果调用的是其他语言开发的服务的时候就不支持了。
+- **性能差**：相比于其他序列化框架性能更低，主要原因是序列化之后的字节数组体积较大，导致传输成本加大。
+- **存在安全问题**：序列化和反序列化本身并不存在问题。但当输入的反序列化的数据可被用户控制，那么攻击者即可通过构造恶意输入，让反序列化产生非预期的对象，在此过程中执行构造的任意代码。相关阅读：[应用安全：JAVA 反序列化漏洞之殇](https://cryin.github.io/blog/secure-development-java-deserialization-vulnerability/) 。
+
+# 七、I/O（简介）
+
+## 1、Java IO 流了解吗？
+
+IO 即 `Input/Output`，输入和输出。数据输入到计算机内存的过程即输入，反之输出到外部存储（比如数据库，文件，远程主机）的过程即输出。数据传输过程类似于水流，因此称为 IO 流。IO 流在 Java 中分为输入流和输出流，而根据数据的处理方式又分为字节流和字符流。
+
+Java IO 流的 40 多个类都是从如下 4 个抽象类基类中派生出来的。
+
+- `InputStream`/`Reader`: 所有的输入流的基类，前者是字节输入流，后者是字符输入流。
+- `OutputStream`/`Writer`: 所有输出流的基类，前者是字节输出流，后者是字符输出流。
+
+## 2、I/O 流为什么要分为字节流和字符流呢?
+
+问题本质想问：**不管是文件读写还是网络发送接收，信息的最小存储单元都是字节，那为什么 I/O 流操作要分为字节流操作和字符流操作呢？**
+
+个人认为主要有两点原因：
+
+- 字符流是由 Java 虚拟机将字节转换得到的，这个过程还算是比较耗时；
+- 如果我们不知道编码类型的话，使用字节流的过程中很容易出现乱码问题。
+
+## 3、Java IO 中的设计模式有哪些？
+
+参考：Java IO 设计模式总结
+
+## 4、BIO、NIO 和 AIO 的区别？
+
+参考：Java IO 模型详解
+
+
+
+# 八、语法糖
+
+## 1、什么是语法糖？
+
+**语法糖（Syntactic sugar）** 代指的是编程语言为了方便程序员开发程序而设计的一种特殊语法，这种语法对编程语言的功能并没有影响。实现相同的功能，基于语法糖写出来的代码往往更简单简洁且更易阅读。
+
+举个例子，Java 中的 `for-each` 就是一个常用的语法糖，其原理其实就是基于普通的 for 循环和迭代器。
+
+```java
+String[] strs = {"JavaGuide", "公众号：JavaGuide", "博客：https://javaguide.cn/"};
+for (String s : strs) {
+    System.out.println(s);
+}
+```
+
+不过，JVM 其实并不能识别语法糖，Java 语法糖要想被正确执行，需要先通过编译器进行解糖，也就是在程序编译阶段将其转换成 JVM 认识的基本语法。这也侧面说明，Java 中真正支持语法糖的是 Java 编译器，而不是 JVM。如果你去看`com.sun.tools.javac.main.JavaCompiler`的源码，你会发现在`compile()`中有一个步骤就是调用`desugar()`，这个方法就是负责解语法糖的实现的。
+
+## 2、Java 中有哪些常见的语法糖？
+
+Java 中最常用的语法糖主要有泛型、自动拆装箱、变长参数、枚举、内部类、增强 for 循环、try-with-resources 语法、lambda 表达式等。
+
+关于这些语法糖的详细解读，请看这篇文章 [Java 语法糖详解]() 。
