@@ -43,6 +43,14 @@
 
 JDK 自带的序列化方式一般不会用 ，因为序列化效率低并且存在安全问题。比较常用的序列化协议有 Hessian、Kryo、Protobuf、ProtoStuff，这些都是基于二进制的序列化协议。
 
+| 序列化方式       | 格式           | 是否跨语言 | 可读性 | 应用场景举例             |
+| ---------------- | -------------- | ---------- | ------ | ------------------------ |
+| Java默认序列化   | 二进制         | ❌          | ❌      | Java内部远程调用、缓存等 |
+| JSON             | 文本           | ✅          | ✅      | Web API通信、前后端传输  |
+| XML              | 文本           | ✅          | ✅      | 配置文件、SOAP协议等     |
+| Protocol Buffers | 二进制（高效） | ✅          | ❌      | 微服务通信、移动端通信   |
+| Thrift / Avro    | 二进制         | ✅          | ❌      | 高性能RPC通信            |
+
 像 JSON 和 XML 这种属于文本类序列化方式。虽然可读性比较好，但是性能较差，一般不会选择。
 
 ## 1、JDK 自带的序列化方式
@@ -190,3 +198,382 @@ private transient String password;
 - **性能差**：相比于其他序列化框架性能更低，主要原因是序列化之后的字节数组体积较大，导致传输成本加大。
 - **存在安全问题**：序列化和反序列化本身并不存在问题。但当输入的反序列化的数据可被用户控制，那么攻击者即可通过构造恶意输入，让反序列化产生非预期的对象，在此过程中执行构造的任意代码。相关阅读：[应用安全:JAVA 反序列化漏洞之殇 - Cryin](https://cryin.github.io/blog/secure-development-java-deserialization-vulnerability/)、[Java 反序列化安全漏洞怎么回事? - Monica](https://www.zhihu.com/question/37562657/answer/1916596031)。
 
+### （5）为什么 JDK 自带序列化不支持跨语言，序列化后传递给前端却能被解析
+
+- **JDK默认序列化是什么？**
+
+  Java 默认的序列化是指使用 `ObjectOutputStream` 和 `ObjectInputStream` 将 Java 对象序列化为二进制（byte stream）格式。这种格式是 Java专用的私有格式，只能被Java程序识别。
+
+  ```java
+  ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream("data.ser"));
+  out.writeObject(myObject);
+  ```
+
+  > 这个序列化后的文件 `data.ser`，只有Java才能反序列化。Python、JavaScript等语言无法解析这种格式。
+
+- **后端传递给前端的数据，并没有用 Java 序列化**
+
+  后端传给前端的数据一般是通过 HTTP 接口传输的，常见的格式有：
+
+  - ✅ JSON（最常见）
+
+  - ✅ XML
+
+  - ✅ Protobuf / Thrift（需要专用工具）
+
+  - ❌ Java的原生序列化（二进制流）不会直接用来给前端
+
+  比如在 Spring Boot 中常见的写法：
+
+  ```java
+  @GetMapping("/user")
+  public User getUser() {
+      return new User("Alice", 20);
+  }
+  ```
+
+  虽然 `User` 是一个 Java 对象，但 Spring Boot 会自动将它转换成 JSON 字符串传给前端，如下：
+
+  ```json
+  {
+    "name": "Alice",
+    "age": 20
+  }
+  ```
+
+  这个过程是通过 `Jackson` 或 `Gson` 等 JSON 序列化工具完成的，和 JDK 默认序列化完全无关。
+
+- **总结对比**
+
+  | 特性           | Java默认序列化    | JSON / XML等标准格式         |
+  | -------------- | ----------------- | ---------------------------- |
+  | 可读性         | ❌ 二进制，不可读  | ✅ 文本，可读                 |
+  | 跨语言兼容性   | ❌ Java专用        | ✅ 跨语言（JS、Python都支持） |
+  | 前后端通信常用 | ❌ 几乎不用        | ✅ 常用                       |
+  | 用途           | Java对象保存/传输 | API数据交换                  |
+
+- **结论**
+
+  前端能解析后端返回的数据，是因为数据是以`JSON`格式传输的，而不是Java默认的二进制序列化格式。JDK默认序列化用于 Java 进程之间的通信或持久化，不适合用于前后端通信或跨语言调用。
+
+## 2、Kryo
+
+Kryo 是一个高性能的序列化/反序列化工具，由于其变长存储特性并使用了字节码生成机制，拥有较高的运行速度和较小的字节码体积。
+
+另外，Kryo 已经是一种非常成熟的序列化实现了，已经在 Twitter、Groupon、Yahoo 以及多个著名开源项目（如 Hive、Storm）中广泛的使用。
+
+[guide-rpc-framework](https://github.com/Snailclimb/guide-rpc-framework) 就是使用的 kryo 进行序列化，序列化和反序列化相关的代码如下：
+
+```java
+/**
+ * Kryo serialization class, Kryo serialization efficiency is very high, but only compatible with Java language
+ *
+ * @author shuang.kou
+ * @createTime 2020年05月13日 19:29:00
+ */
+@Slf4j
+public class KryoSerializer implements Serializer {
+
+    /**
+     * Because Kryo is not thread safe. So, use ThreadLocal to store Kryo objects
+     */
+    private final ThreadLocal<Kryo> kryoThreadLocal = ThreadLocal.withInitial(() -> {
+        Kryo kryo = new Kryo();
+        kryo.register(RpcResponse.class);
+        kryo.register(RpcRequest.class);
+        return kryo;
+    });
+
+    @Override
+    public byte[] serialize(Object obj) {
+        try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+             Output output = new Output(byteArrayOutputStream)) {
+            Kryo kryo = kryoThreadLocal.get();
+            // Object->byte:将对象序列化为byte数组
+            kryo.writeObject(output, obj);
+            kryoThreadLocal.remove();
+            return output.toBytes();
+        } catch (Exception e) {
+            throw new SerializeException("Serialization failed");
+        }
+    }
+
+    @Override
+    public <T> T deserialize(byte[] bytes, Class<T> clazz) {
+        try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(bytes);
+             Input input = new Input(byteArrayInputStream)) {
+            Kryo kryo = kryoThreadLocal.get();
+            // byte->Object:从byte数组中反序列化出对象
+            Object o = kryo.readObject(input, clazz);
+            kryoThreadLocal.remove();
+            return clazz.cast(o);
+        } catch (Exception e) {
+            throw new SerializeException("Deserialization failed");
+        }
+    }
+
+}
+```
+
+GitHub 地址：https://github.com/EsotericSoftware/kryo 。
+
+## 3、Protobuf
+
+Protobuf 出自于 Google，性能还比较优秀，也支持多种语言，同时还是跨平台的。就是在使用中过于繁琐，因为你需要自己定义 IDL 文件和生成对应的序列化代码。这样虽然不灵活，但是，另一方面导致 protobuf 没有序列化漏洞的风险。
+
+> Protobuf 包含序列化格式的定义、各种语言的库以及一个 IDL 编译器。正常情况下你需要定义 proto 文件，然后使用 IDL 编译器编译成你需要的语言
+
+一个简单的 proto 文件如下：
+
+```java
+// protobuf的版本
+syntax = "proto3";
+// SearchRequest会被编译成不同的编程语言的相应对象，比如Java中的class、Go中的struct
+message Person {
+  //string类型字段
+  string name = 1;
+  // int 类型字段
+  int32 age = 2;
+}
+```
+
+GitHub 地址：https://github.com/protocolbuffers/protobuf。
+
+## 4、ProtoStuff
+
+由于 Protobuf 的易用性较差，它的哥哥 Protostuff 诞生了。
+
+protostuff 基于 Google protobuf，但是提供了更多的功能和更简易的用法。虽然更加易用，但是不代表 ProtoStuff 性能更差。
+
+GitHub 地址：https://github.com/protostuff/protostuff。
+
+## 5、Hessian
+
+Hessian 是一个轻量级的，自定义描述的二进制 RPC 协议。Hessian 是一个比较老的序列化实现了，并且同样也是跨语言的。
+
+<img src="./../assets/Hessian.png" style="zoom:50%;" />
+
+Dubbo2.x 默认启用的序列化方式是 Hessian2 ,但是，Dubbo 对 Hessian2 进行了修改，不过大体结构还是差不多。
+
+## 6、总结
+
+Kryo 是专门针对 Java 语言序列化方式并且性能非常好，如果你的应用是专门针对 Java 语言的话可以考虑使用，并且 Dubbo 官网的一篇文章中提到说推荐使用 Kryo 作为生产环境的序列化方式。(文章地址：https://cn.dubbo.apache.org/zh-cn/docsv2.7/user/serialization/）。
+
+![](./../assets/Kryo_Dubbo.png)
+
+像 Protobuf、 ProtoStuff、hessian 这类都是跨语言的序列化方式，如果有跨语言需求的话可以考虑使用。
+
+除了我上面介绍到的序列化方式的话，还有像 Thrift，Avro 这些。
+
+# 三、序列化案例
+
+## 1、JDK 默认序列化
+
+- 定义实体类，实现 `Serializable `接口
+
+  ```java
+  import java.io.Serializable;
+  
+  public class User implements Serializable {
+      private String name;
+      private int age;
+  
+      public User() {}
+      public User(String name, int age) {
+          this.name = name;
+          this.age = age;
+      }
+  
+      @Override
+      public String toString() {
+          return "User{name='" + name + "', age=" + age + '}';
+      }
+  }
+  ```
+
+  
+
+- 使用 `ObjectOutputStream` 序列化/反序列化
+
+  ```java
+  import java.io.*;
+  
+  public class JdkSerializationTest {
+  
+      private static final String FILE_PATH = "user.jdk";
+  
+      public static void main(String[] args) throws Exception {
+          User user = new User("Bob", 40);
+  
+          // 序列化
+          try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(FILE_PATH))) {
+              oos.writeObject(user);
+          }
+  
+          System.out.println("JDK 默认序列化完成");
+  
+          // 反序列化
+          try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(FILE_PATH))) {
+              User deserialized = (User) ois.readObject();
+              System.out.println("反序列化结果：" + deserialized);
+          }
+      }
+  }
+  
+  ```
+
+  
+
+## 2、Kryo 序列化
+
+- 引入 Kryo 依赖
+
+  ```xml
+  <!-- kryo 序列化依赖-->
+  <dependency>
+      <groupId>com.esotericsoftware</groupId>
+      <artifactId>kryo</artifactId>
+      <version>5.6.0</version>
+  </dependency>
+  ```
+
+- 定义实体类，实现 `Serializable `接口
+
+  ```java
+  import java.io.Serializable;
+  
+  public class User implements Serializable {
+      private String name;
+      private int age;
+  
+      public User() {}
+      public User(String name, int age) {
+          this.name = name;
+          this.age = age;
+      }
+  
+      @Override
+      public String toString() {
+          return "User{name='" + name + "', age=" + age + '}';
+      }
+  }
+  ```
+
+- 使用 `ObjectOutputStream` 序列化/反序列化
+
+  ```java
+  import com.esotericsoftware.kryo.Kryo;
+  import com.esotericsoftware.kryo.io.Input;
+  import com.esotericsoftware.kryo.io.Output;
+  
+  import java.io.FileInputStream;
+  import java.io.FileOutputStream;
+  
+  public class KryoLocalTest {
+  
+      private static final String FILE_PATH = "user.kryo";
+  
+      public static void main(String[] args) throws Exception {
+          Kryo kryo = new Kryo();
+          kryo.setRegistrationRequired(false); // 不需要注册类
+  
+          // 序列化
+          User user = new User("Alice", 30);
+          try (Output output = new Output(new FileOutputStream(FILE_PATH))) {
+              kryo.writeClassAndObject(output, user);
+          }
+  
+          System.out.println("序列化完成");
+  
+          // 反序列化
+          try (Input input = new Input(new FileInputStream(FILE_PATH))) {
+              Object object = kryo.readClassAndObject(input);
+              User deserializedUser = (User) object;
+              System.out.println("反序列化得到：" + deserializedUser);
+          }
+      }
+  }
+  ```
+
+⚠ 注意：
+
+- Kryo 不是线程安全的，实际项目中应避免共享 Kryo 实例。
+
+- 可以使用 kryo.setRegistrationRequired(true) 进一步提升性能，但需要手动 kryo.register(User.class)。
+
+- Kryo 不需要实现 Serializable 接口，但我们经常仍然会写 implements Serializable，原因包括：
+
+  | 原因                 | 说明                                                         |
+  | -------------------- | ------------------------------------------------------------ |
+  | ✅ 保持兼容性         | 如果类将来可能被用于 JDK 原生序列化场景（如 RMI、Session、Java缓存），加上更安全 |
+  | ✅ IDE 检查习惯       | 有些框架或工具（如某些缓存/持久化系统）会默认检测是否实现了 `Serializable` |
+  | ✅ 避免误用默认序列化 | 表明这个类是可以序列化的，即使用的是其他方式（比如 Kryo），也是一种显式的声明 |
+  | ✅ 防止潜在 Bug       | 比如某些代码组件反射调用 `ObjectOutputStream`，加上后更健壮  |
+
+### （1）Kryo 注册
+
+🔍 什么是“注册类”？
+Kryo 是一种 高性能二进制序列化工具，它在序列化对象时要保存对象的 类型信息，以便反序列化时知道该还原成哪个类。
+
+Kryo 序列化类型的两种方式：
+
+| 模式               | 说明                                                         | 示例         |
+| ------------------ | ------------------------------------------------------------ | ------------ |
+| **未注册（默认）** | Kryo 会将类的全名（如 `com.example.User`）序列化进数据中     | 占用较多字节 |
+| **已注册**         | 你手动注册类，会分配一个小编号（int），只序列化编号，不写类名 | 更快更小     |
+
+✅ `setRegistrationRequired(true)`  的作用
+表示 你必须手动注册所有要序列化的类，否则 Kryo 会抛出异常，提示你没有注册这个类。
+
+例子：
+
+```java
+Kryo kryo = new Kryo();
+kryo.setRegistrationRequired(true);
+kryo.register(User.class); // 👈 必须注册！
+
+// 否则下面的写入会抛错【如果只开启注册选项，但没有注册实体类】
+kryo.writeClassAndObject(output, new User("Tom", 18));
+
+```
+
+✅ 注册和不注册的对比
+
+| 特性               | 不注册类（false）      | 注册类（true + register） |
+| ------------------ | ---------------------- | ------------------------- |
+| 是否必须手动注册类 | ❌ 否                   | ✅ 是                      |
+| 序列化内容         | 写入完整类名（字符串） | 写入编号（int）           |
+| 序列化大小         | 稍大                   | 更小                      |
+| 序列化速度         | 稍慢                   | 更快                      |
+| 兼容性             | 更灵活，类名变也能处理 | 不灵活，注册顺序不能变    |
+| 出错容错           | 容错性强               | 出错概率大，顺序不能错    |
+| 推荐场景           | 开发调试、简单项目     | 性能敏感、类型稳定的系统  |
+
+🧠 加分理解：注册类的风险
+
+> 注册顺序千万不要变！否则会反序列化成错误类型！
+
+例子：
+
+```java
+kryo.register(User.class);  // 被分配 ID=0
+kryo.register(Order.class); // 被分配 ID=1
+```
+
+如果改了顺序：
+
+```java
+kryo.register(Order.class); // 现在 ID=0
+kryo.register(User.class);  // 现在 ID=1
+```
+
+那么你之前序列化的二进制就会错位反序列化，造成灾难性的错误（比如类型变错）。
+
+因此你还可以用：
+
+```java
+kryo.register(User.class, 10);
+kryo.register(Order.class, 11);
+```
+
+➡️ 显式指定注册 ID，防止顺序变化。
