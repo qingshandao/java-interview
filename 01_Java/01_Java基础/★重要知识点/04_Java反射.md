@@ -283,7 +283,7 @@ ClassLoader.getSystemClassLoader().loadClass("cn.javaguide.TargetObject");
 
 ## 2、反射的一些基本操作
 
-### （1）创建一个要使用反射操作的类 `TargetObject`。
+### 2.1、创建一个要使用反射操作的类 `TargetObject`。
 
 ```java
 public class TargetObject {
@@ -310,7 +310,9 @@ public class TargetObject {
 }
 ```
 
-### （2）使用反射操作这个类的方法以及属性
+### 2.2使用反射操作这个类的方法以及属性
+
+#### 2.2.1
 
 ```java
 import java.lang.reflect.Field;
