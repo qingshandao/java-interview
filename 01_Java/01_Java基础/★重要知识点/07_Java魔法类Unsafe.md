@@ -340,3 +340,5 @@ DirectByteBuffer(int cap) {                   // package-private
 }
 ```
 
+### 3.2、内存屏障
+
