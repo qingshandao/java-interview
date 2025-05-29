@@ -350,3 +350,98 @@ DirectByteBuffer(int cap) {                   // package-private
 
 `Unsafe` 中提供了下面三个内存屏障相关方法：
 
+```java
+//内存屏障，禁止load操作重排序。屏障前的load操作不能被重排序到屏障后，屏障后的load操作不能被重排序到屏障前，并且从 主内存中重新读取 数据。
+public native void loadFence();
+//内存屏障，禁止store操作重排序。屏障前的store操作不能被重排序到屏障后，屏障后的store操作不能被重排序到屏障前
+public native void storeFence();
+//内存屏障，禁止load、store操作重排序
+public native void fullFence();
+```
+
+内存屏障可以看做对内存随机访问的操作中的一个同步点，使得此点之前的所有读写操作都执行后才可以开始执行此点之后的操作。以`loadFence`方法为例，它会禁止读操作重排序，保证在这个屏障之前的所有读操作都已经完成，并且将缓存数据设为无效，重新从主存中进行加载。
+
+看到这估计很多小伙伴们会想到`volatile`关键字了，如果在字段上添加了`volatile`关键字，就能够实现字段在多线程下的可见性。基于读内存屏障，我们也能实现相同的功能。下面定义一个线程方法，在线程中去修改`flag`标志位，注意这里的`flag`是没有被`volatile`修饰的：
+
+```java
+@Getter
+class ChangeThread implements Runnable{
+    /**volatile**/ boolean flag=false;
+    @Override
+    public void run() {
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("subThread now flag :" + flag);
+        flag = true;
+        System.out.println("subThread change flag to:" + flag);
+    }
+}
+```
+
+在主线程的`while`循环中，加入内存屏障，测试是否能够感知到`flag`的修改变化：
+
+```java
+public static void main(String[] args){
+    ChangeThread changeThread = new ChangeThread();
+    new Thread(changeThread).start();
+    while (true) {
+        boolean flag = changeThread.isFlag();
+        unsafe.loadFence(); //加入读内存屏障
+        if (flag){
+            System.out.println("detected flag changed");
+            break;
+        }
+    }
+    System.out.println("main thread end");
+}
+```
+
+运行结果：
+
+```java
+subThread change flag to:false
+detected flag changed
+main thread end
+```
+
+而如果删掉上面代码中的`loadFence`方法，那么主线程将无法感知到`flag`发生的变化，会一直在`while`中循环。可以用图来表示上面的过程：
+
+<img src="./../assets/unsafe_MemoryBarrier_demo1.png" style="zoom:80%;" />
+
+- **为什么不加入内存屏障（或不加 `volatile`），主线程就可能无法读到 `flag == true`？**
+
+  - 背景：
+
+  在 Java 中，每个线程都有自己的 **工作内存（类似 CPU 缓存）**，它可以从主内存中读取变量的副本进行操作。如果某个线程更新了变量的值，并没有及时 **刷新回主内存**，其他线程是 **看不到更新的值** 的。
+
+  - 在代码中：
+
+    ```java
+    boolean flag = changeThread.isFlag();
+    ```
+
+    主线程不停地读取 `flag`，但是这个 `flag` 并没有被声明为 `volatile`，所以主线程 **可能永远使用的是自己缓存中的旧值 `false`**。
+
+    而子线程更新了 `flag = true;`，但这个变化：
+
+    1. 可能没有及时刷新到主内存；
+    2. 即使刷新了，主线程也 **没有强制从主内存重新加载这个变量**。
+
+    所以主线程可能永远看不到 `true`，就会陷入死循环。
+
+- **为什么加入 `unsafe.loadFence()`（读内存屏障）后就能读取到 `true`？**
+
+  -  `unsafe.loadFence()` 是什么？
+
+  这是一个 **读内存屏障**，作用是：
+
+  > 保证在它之后的所有读操作，必须在它之前的读操作完成之后，并且从 **主内存中重新读取** 数据。
+
+  - 效果：
+
+  加了这句之后，主线程 **每次读取 `flag` 时，都会强制从主内存读取一次值**，这样就能看到子线程更新后的 `true`，从而跳出循环。
+
+  这跟使用 `volatile` 有类似的效果（但 `volatile` 是编译器+JVM层面处理的，屏蔽了这些细节）。
