@@ -502,54 +502,55 @@ public boolean validate(long stamp) {
 ### 3.3、对象操作
 #### 3.3.1、介绍
 
-- 例子
+- **例子**
 
   ```java
   import sun.misc.Unsafe;
   import java.lang.reflect.Field;
   
-  public class Main {
+  public class DemoTest {
   
       private int value;
   
-      public static void main(String[] args) throws Exception{
-          Unsafe unsafe = reflectGetUnsafe();
+      public static void main(String[] args) throws Exception {
+          Unsafe unsafe = getUnsafe();
           assert unsafe != null;
-          long offset = unsafe.objectFieldOffset(Main.class.getDeclaredField("value"));
-          Main main = new Main();
-          System.out.println("value before putInt: " + main.value);
-          unsafe.putInt(main, offset, 42);
-          System.out.println("value after putInt: " + main.value);
-          System.out.println("value after putInt: " + unsafe.getInt(main, offset));
+          // 获取指定类的成员变量内存偏移值
+          long valueOffest = unsafe.objectFieldOffset(DemoTest.class.getDeclaredField("value"));  
+          DemoTest demoTest = new DemoTest();
+          System.out.println("🔵Before Change Value: " + demoTest.value);
+          // 通过对象中成员变量的内存偏移值，修改成员变量的值
+          unsafe.putInt(demoTest,valueOffest,666);
+          System.out.println("🟢After Change Value：" + demoTest.value);
+          // 通过对象中成员变量的内存偏移值，获取成员变量的值
+          System.out.println("🟡Get Value By Unsafe.getInt: " + unsafe.getInt(demoTest,valueOffest));
       }
   
-      private static Unsafe reflectGetUnsafe() {
+      public static Unsafe getUnsafe(){
           try {
-              Field field = Unsafe.class.getDeclaredField("theUnsafe");
-              field.setAccessible(true);
-              return (Unsafe) field.get(null);
-          } catch (Exception e) {
-              e.printStackTrace();
-              return null;
+              Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+              theUnsafe.setAccessible(true);
+              return (Unsafe) theUnsafe.get(null);
+          } catch (NoSuchFieldException | IllegalAccessException e) {
+              throw new RuntimeException(e);
           }
       }
-  
   }
   ```
 
   - 输出结果：
 
     ```java
-    value before putInt: 0
-    value after putInt: 42
-    value after putInt: 42
+    🔵Before Change Value: 0
+    🟢After Change Value：666
+    🟡Get Value By Unsafe: 666
     ```
 
     
 
 - 对象属性
 
-  对象成员属性的内存偏移量获取，以及字段属性值的修改，在上面的例子中已经测试过了。除了前面的`putInt`、`getInt`方法外，Unsafe 提供了全部 8 种基础数据类型以及`Object`的`put`和`get`方法，并且所有的`put`方法都可以越过访问权限，直接修改内存中的数据。阅读 openJDK 源码中的注释发现，基础数据类型和`Object`的读写稍有不同，基础数据类型是直接操作的属性值（`value`），而`Object`的操作则是基于引用值（`reference value`）。下面是`Object`的读写方法：
+  对象成员属性的内存偏移量获取，以及字段属性值的修改，在上面的例子中已经测试过了。除了前面的`putInt`、`getInt`方法外，Unsafe 提供了全部 8 种基础数据类型以及`Object`的`put`和`get`方法，并且所有的`put`方法都可以越过访问权限（如 `private`、`protected`），直接修改内存中的数据。阅读 openJDK 源码中的注释发现，基础数据类型和`Object`的读写稍有不同，基础数据类型是直接操作的属性值（`value`），而`Object`的操作则是基于引用值（`reference value`）。下面是`Object`的读写方法：
 
   ```java
   //在对象的指定偏移地址获取一个对象引用
@@ -569,7 +570,9 @@ public boolean validate(long stamp) {
 
   相对于普通读写来说，`volatile`读写具有更高的成本，因为它需要保证可见性和有序性。在执行`get`操作时，会强制从主存中获取属性值，在使用`put`方法设置属性值时，会强制将值更新到主存中，从而保证这些变更对其他线程是可见的。
 
-  有序写入的方法有以下三个：
+  
+  
+- 有序写入的方法有以下三个：
 
   ```java
   public native void putOrderedObject(Object o, long offset, Object x);
@@ -577,8 +580,196 @@ public boolean validate(long stamp) {
   public native void putOrderedLong(Object o, long offset, long x);
   ```
 
+  有序写入的成本相对`volatile`较低，因为它只保证写入时的有序性，而不保证可见性，也就是一个线程写入的值不能保证其他线程立即可见。为了解决这里的差异性，需要对内存屏障的知识点再进一步进行补充，首先需要了解两个指令的概念：
+
+  - `Load`：将主内存中的数据拷贝到处理器的缓存中
+  - `Store`：将处理器缓存的数据刷新到主内存中
+
+  顺序写入与`volatile`写入的差别在于，在顺序写时加入的内存屏障类型为`StoreStore`类型，而在`volatile`写入时加入的内存屏障是`StoreLoad`类型，如下图所示：
+
+  ![](./../assets/Unsafe_Volatile.png)
+
+  在有序写入方法中，使用的是`StoreStore`屏障，该屏障确保`Store1`立刻刷新数据到内存，这一操作先于`Store2`以及后续的存储指令操作。而在`volatile`写入中，使用的是`StoreLoad`屏障，该屏障确保`Store1`立刻刷新数据到内存，这一操作先于`Load2`及后续的装载指令，并且，`StoreLoad`屏障会使该屏障之前的所有内存访问指令，包括存储指令和访问指令全部完成之后，才执行该屏障之后的内存访问指令。
+
+  综上所述，在上面的三类写入方法中，在写入效率方面，按照`put`、`putOrder`、`putVolatile`的顺序效率逐渐降低。
+
   
 
-- 对象实例化
+- **对象实例化**
 
-- 的
+  使用 `Unsafe` 的 `allocateInstance` 方法，允许我们使用非常规的方式进行对象的实例化，首先定义一个实体类，并且在构造函数中对其成员变量进行赋值操作：
+
+  ```java
+  @Data
+  public class A {
+      private int num;
+      public A(){
+          this.num = 666;
+      }
+  }
+  ```
+
+  分别基于构造函数、反射以及 `Unsafe` 方法的不同方式创建对象进行比较：
+
+  ```java
+  public class InstanceTest {
+      public static void main(String[] args) throws Exception {
+          A a1 = new A();
+          System.out.println("🔵 new 对象：" + a1.getNum());
+  
+          A a2 = A.class.newInstance();
+          System.out.println("🟢 反射构造对象：" + a2.getNum());
+  
+          Unsafe unsafe = getUnsafe();
+          A a3 = (A)unsafe.allocateInstance(A.class);
+          System.out.println("🟡 unsafe构造对象：" + a3.getNum());
+      }
+  
+      public static Unsafe getUnsafe(){
+          try {
+              Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+              theUnsafe.setAccessible(true);
+              return (Unsafe) theUnsafe.get(null);
+          } catch (NoSuchFieldException | IllegalAccessException e) {
+              throw new RuntimeException(e);
+          }
+      }
+  }
+  ```
+
+  输出结果：
+
+  ```
+  🔵 new 对象：666
+  🟢 反射构造对象：666
+  🟡 unsafe构造对象：0
+  ```
+
+  
+
+  打印结果分别为 666、666、0，说明通过`allocateInstance`方法创建对象过程中，**不会调用类的构造方法**。
+
+  使用这种方式创建对象时，只用到了`Class`对象，所以如果想要跳过对象的初始化阶段或者跳过构造器的安全检查，就可以使用这种方法。
+
+  在上面的例子中，如果将 A 类的构造函数改为`private`类型，将无法通过构造函数和反射创建对象（可以通过构造函数对象 `setAccessible` 后创建对象），但`allocateInstance`方法仍然有效。
+  
+  使用 `Unsafe.allocateInstance(Class<?> cls)` 创建对象时：
+  
+  - **不会执行任何构造方法**；
+  - 不会执行 `static` 初始化块；
+  - 不会执行 `instance initializer`（如字段赋值）；
+  - 所有字段值均为默认值（null、0、false 等）；
+  - 是一种“裸分配”对象。
+  - 想要初始化，只能手动初始化需要的值
+
+#### 3.3.2、典型应用
+
+- **常规对象实例化方式**：通常所用到的创建对象的方式，从本质上来讲，都是通过 `new` 机制来实现对象的创建。但是，`new` 机制有个特点就是当类只提供有参的构造函数且无显式声明无参构造函数时，则必须使用有参构造函数进行对象构造，而使用有参构造函数时，必须传递相应个数的参数才能完成对象实例化。
+
+- **非常规的实例化方式**：而 Unsafe 中提供 `allocateInstance` 方法，仅通过 Class 对象就可以创建此类的实例对象，而且不需要调用其构造函数、初始化代码、JVM 安全检查等。它抑制修饰符检测，也就是即使构造器是 private 修饰的也能通过此方法实例化，只需提类对象即可创建相应的对象。由于这种特性，`allocateInstance` 在 java.lang.invoke、Objenesis（提供绕过类构造器的对象生成方式）、Gson（反序列化时用到）中都有相应的应用。
+
+### 3.4、数组操作
+
+#### 3.4.1、介绍
+
+`arrayBaseOffset` 与 `arrayIndexScale` 这两个方法配合起来使用，即可定位数组中每个元素在内存中的位置。
+
+```java
+//返回数组中第一个元素的偏移地址
+public native int arrayBaseOffset(Class<?> arrayClass);
+//返回数组中一个元素占用的大小
+public native int arrayIndexScale(Class<?> arrayClass);
+```
+
+#### 3.4.2、典型应用
+
+这两个与数据操作相关的方法，在 `java.util.concurrent.atomic` 包下的 `AtomicIntegerArray`（可以实现对 `Integer` 数组中每个元素的原子性操作）中有典型的应用，如下图 `AtomicIntegerArray` 源码所示，通过 `Unsafe` 的 `arrayBaseOffset`、`arrayIndexScale` 分别获取数组首元素的偏移地址 `base` 及单个元素大小因子 `scale` 。后续相关原子性操作，均依赖于这两个值进行数组中元素的定位，如下图二所示的 `getAndAdd` 方法即通过 `checkedByteOffset` 方法获取某数组元素的偏移地址，而后通过 CAS 实现原子性操作。
+
+<img src="./../assets/Unsafe_Array.png"/>
+
+### 3.5、CAS 操作
+
+#### 3.5.1、介绍
+
+这部分主要为 CAS 相关操作的方法。
+
+```java
+/**
+  *  CAS
+  * @param o         包含要修改field的对象
+  * @param offset    对象中某field的偏移量
+  * @param expected  期望值
+  * @param update    更新值
+  * @return          true | false
+  */
+public final native boolean compareAndSwapObject(Object o, long offset,  Object expected, Object update);
+
+public final native boolean compareAndSwapInt(Object o, long offset, int expected,int update);
+
+public final native boolean compareAndSwapLong(Object o, long offset, long expected, long update);
+```
+
+- **什么是 CAS?** 
+
+  CAS 即比较并替换（Compare And Swap)，是实现并发算法时常用到的一种技术。CAS 操作包含三个操作数——内存位置、预期原值及新值。执行 CAS 操作的时候，将内存位置的值与预期原值比较，如果相匹配，那么处理器会自动将该位置值更新为新值，否则，处理器不做任何操作。我们都知道，CAS 是一条 CPU 的原子指令（cmpxchg 指令），不会造成所谓的数据不一致问题，`Unsafe` 提供的 CAS 方法（如 `compareAndSwapXXX`）底层实现即为 CPU 指令 `cmpxchg`。
+
+#### 3.5.2、典型应用
+
+在 JUC 包的并发工具类中大量地使用了 CAS 操作，像 `synchronized` 和 `AQS` 的文章中也多次提到了 CAS，其作为乐观锁在并发工具类中广泛发挥了作用。
+
+在 `Unsafe` 类中，提供了`compareAndSwapObject`、`compareAndSwapInt`、`compareAndSwapLong`方法来实现的对`Object`、`int`、`long`类型的 CAS 操作。以`compareAndSwapInt`方法为例：
+
+```java
+public final native boolean compareAndSwapInt(Object o, long offset,int expected,int x);
+```
+
+参数中，
+
+- `o`为需要更新的对象，
+
+- `offset`是对象`o`中整形字段的偏移量，如果这个字段的值与`expected`相同，则将字段的值设为`x`这个新值，并且此更新是不可被中断的，也就是一个原子操作。
+
+下面是一个使用`compareAndSwapInt`的例子：
+
+```java
+private volatile int a;
+public static void main(String[] args){
+    CasTest casTest=new CasTest();
+    new Thread(()->{
+        for (int i = 1; i < 5; i++) {
+            casTest.increment(i);
+            System.out.print(casTest.a+" ");
+        }
+    }).start();
+    new Thread(()->{
+        for (int i = 5 ; i <10 ; i++) {
+            casTest.increment(i);
+            System.out.print(casTest.a+" ");
+        }
+    }).start();
+}
+
+private void increment(int x){
+    while (true){
+        try {
+            long fieldOffset = unsafe.objectFieldOffset(CasTest.class.getDeclaredField("a"));
+            if (unsafe.compareAndSwapInt(this,fieldOffset,x-1,x))
+                break;
+        } catch (NoSuchFieldException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+运行代码会依次输出：
+
+```java
+1 2 3 4 5 6 7 8 9
+```
+
+在上面的例子中，使用两个线程去修改`int`型属性`a`的值，并且只有在`a`的值等于传入的参数`x`减一时，才会将`a`的值变为`x`，也就是实现对`a`的加一的操作。流程如下所示：
+
+![](./../assets/Unsafe_CAS.png)
+
+需要注意的是，在调用`compareAndSwapInt`方法后，会直接返回`true`或`false`的修改结果，因此需要我们在代码中手动添加自旋的逻辑。在`AtomicInteger`类的设计中，也是采用了将`compareAndSwapInt`的结果作为循环条件，直至修改成功才退出死循环的方式来实现的原子性的自增操作。
