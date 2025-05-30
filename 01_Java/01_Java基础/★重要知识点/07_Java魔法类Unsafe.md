@@ -445,3 +445,140 @@ main thread end
   加了这句之后，主线程 **每次读取 `flag` 时，都会强制从主内存读取一次值**，这样就能看到子线程更新后的 `true`，从而跳出循环。
 
   这跟使用 `volatile` 有类似的效果（但 `volatile` 是编译器+JVM层面处理的，屏蔽了这些细节）。
+
+- **为什么🐞 debug 模式下用断点调试却可以读到 `true`？**
+
+  这其实是个很常见的现象，**调试会“干扰”正常执行顺序**：
+
+  1. 调试器会暂停线程执行，JVM 有机会同步工作内存和主内存；
+  2. 有些 JIT 优化会被禁用；
+  3. JVM 会因为“你在调试”而采取更保守的策略，例如强制刷新主内存。
+
+  所以在断点调试时看到了 `flag == true`，并不能说明代码在正常运行时就会有相同行为。
+
+- ✅ 正确做法
+
+  应该用 `volatile` 关键字：
+
+  ```java
+  volatile boolean flag = false;
+  ```
+
+  这样 JVM 会确保：
+  
+  1. 写操作会 **立刻刷新到主内存**；
+  2. 读操作会 **总是从主内存读取**；
+  
+  这是最安全和推荐的方式。
+  
+- ⚠️ 注意事项
+  
+  - `volatile` **不能保证原子性**（如 `count++` 仍然线程不安全）；
+  - 如果你需要“可见性 + 原子性”，考虑用：
+    - `synchronized`
+    - `AtomicInteger` 等原子类
+  - 不可滥用，乱用会导致性能下降和逻辑错误。
+  
+  | 功能       | `volatile` | `synchronized` | `AtomicInteger` |
+  | ---------- | ---------- | -------------- | --------------- |
+  | 内存可见性 | ✅ 有       | ✅ 有           | ✅ 有            |
+  | 原子性     | ❌ 无       | ✅ 有           | ✅ 有            |
+  | 指令重排序 | ✅ 禁止部分 | ✅ 禁止         | ✅ 禁止          |
+  | 性能       | 高         | 低（加锁）     | 高              |
+
+#### 3.2.2、典型应用
+
+在 Java 8 中引入了一种锁的新机制——`StampedLock`，它可以看成是读写锁的一个改进版本。`StampedLock` 提供了一种乐观读锁的实现，这种乐观读锁类似于无锁的操作，完全不会阻塞写线程获取写锁，从而缓解读多写少时写线程“饥饿”现象。由于 `StampedLock` 提供的乐观读锁不阻塞写线程获取读锁，当线程共享变量从主内存 load 到线程工作内存时，会存在数据不一致问题。
+
+为了解决这个问题，`StampedLock` 的 `validate` 方法会通过 `Unsafe` 的 `loadFence` 方法加入一个 `load` 内存屏障。
+
+```java
+public boolean validate(long stamp) {
+   U.loadFence();
+   return (stamp & SBITS) == (state & SBITS);
+}
+```
+
+### 3.3、对象操作
+#### 3.3.1、介绍
+
+- 例子
+
+  ```java
+  import sun.misc.Unsafe;
+  import java.lang.reflect.Field;
+  
+  public class Main {
+  
+      private int value;
+  
+      public static void main(String[] args) throws Exception{
+          Unsafe unsafe = reflectGetUnsafe();
+          assert unsafe != null;
+          long offset = unsafe.objectFieldOffset(Main.class.getDeclaredField("value"));
+          Main main = new Main();
+          System.out.println("value before putInt: " + main.value);
+          unsafe.putInt(main, offset, 42);
+          System.out.println("value after putInt: " + main.value);
+          System.out.println("value after putInt: " + unsafe.getInt(main, offset));
+      }
+  
+      private static Unsafe reflectGetUnsafe() {
+          try {
+              Field field = Unsafe.class.getDeclaredField("theUnsafe");
+              field.setAccessible(true);
+              return (Unsafe) field.get(null);
+          } catch (Exception e) {
+              e.printStackTrace();
+              return null;
+          }
+      }
+  
+  }
+  ```
+
+  - 输出结果：
+
+    ```java
+    value before putInt: 0
+    value after putInt: 42
+    value after putInt: 42
+    ```
+
+    
+
+- 对象属性
+
+  对象成员属性的内存偏移量获取，以及字段属性值的修改，在上面的例子中已经测试过了。除了前面的`putInt`、`getInt`方法外，Unsafe 提供了全部 8 种基础数据类型以及`Object`的`put`和`get`方法，并且所有的`put`方法都可以越过访问权限，直接修改内存中的数据。阅读 openJDK 源码中的注释发现，基础数据类型和`Object`的读写稍有不同，基础数据类型是直接操作的属性值（`value`），而`Object`的操作则是基于引用值（`reference value`）。下面是`Object`的读写方法：
+
+  ```java
+  //在对象的指定偏移地址获取一个对象引用
+  public native Object getObject(Object o, long offset);
+  //在对象指定偏移地址写入一个对象引用
+  public native void putObject(Object o, long offset, Object x);
+  ```
+
+  除了对象属性的普通读写外，`Unsafe` 还提供了 **volatile 读写**和**有序写入**方法。`volatile`读写方法的覆盖范围与普通读写相同，包含了全部基础数据类型和`Object`类型，以`int`类型为例：
+
+  ```java
+  //在对象的指定偏移地址处读取一个int值，支持volatile load语义
+  public native int getIntVolatile(Object o, long offset);
+  //在对象指定偏移地址处写入一个int，支持volatile store语义
+  public native void putIntVolatile(Object o, long offset, int x);
+  ```
+
+  相对于普通读写来说，`volatile`读写具有更高的成本，因为它需要保证可见性和有序性。在执行`get`操作时，会强制从主存中获取属性值，在使用`put`方法设置属性值时，会强制将值更新到主存中，从而保证这些变更对其他线程是可见的。
+
+  有序写入的方法有以下三个：
+
+  ```java
+  public native void putOrderedObject(Object o, long offset, Object x);
+  public native void putOrderedInt(Object o, long offset, int x);
+  public native void putOrderedLong(Object o, long offset, long x);
+  ```
+
+  
+
+- 对象实例化
+
+- 的
