@@ -700,7 +700,7 @@ public native int arrayIndexScale(Class<?> arrayClass);
   * @param offset    对象中某field的偏移量
   * @param expected  期望值
   * @param update    更新值
-  * @return          true | false
+  * @return          true | false，是否 “比较并交换”成功
   */
 public final native boolean compareAndSwapObject(Object o, long offset,  Object expected, Object update);
 
@@ -711,7 +711,7 @@ public final native boolean compareAndSwapLong(Object o, long offset, long expec
 
 - **什么是 CAS?** 
 
-  CAS 即比较并替换（Compare And Swap)，是实现并发算法时常用到的一种技术。CAS 操作包含三个操作数——内存位置、预期原值及新值。执行 CAS 操作的时候，将内存位置的值与预期原值比较，如果相匹配，那么处理器会自动将该位置值更新为新值，否则，处理器不做任何操作。我们都知道，CAS 是一条 CPU 的原子指令（cmpxchg 指令），不会造成所谓的数据不一致问题，`Unsafe` 提供的 CAS 方法（如 `compareAndSwapXXX`）底层实现即为 CPU 指令 `cmpxchg`。
+  CAS 即比较并替换（Compare And Swap)，是实现并发算法时常用到的一种技术。CAS 操作包含三个操作数——**内存位置**、**预期原值**及**新值**。执行 CAS 操作的时候，将内存位置的值与预期原值比较，如果相匹配，那么处理器会自动将该位置值更新为新值，否则，处理器不做任何操作。我们都知道，CAS 是一条 CPU 的原子指令（cmpxchg 指令），不会造成所谓的数据不一致问题，`Unsafe` 提供的 CAS 方法（如 `compareAndSwapXXX`）底层实现即为 CPU 指令 `cmpxchg`。
 
 #### 3.5.2、典型应用
 
@@ -776,4 +776,226 @@ private void increment(int x){
 
 在`AtomicInteger`类的设计中，也是采用了将`compareAndSwapInt`的结果作为循环条件，直至修改成功才退出死循环的方式来实现的原子性的自增操作。
 
-## 试试上面的代码
+### 3.6、线程调度
+
+#### 3.6.1、介绍
+
+`Unsafe` 类中提供了`park`、`unpark`、`monitorEnter`、`monitorExit`、`tryMonitorEnter`方法进行线程调度。
+
+```java
+//取消阻塞线程
+/**
+* @param thread : 被唤醒的指定线程
+*/
+public native void unpark(Object thread);
+
+//阻塞线程
+/**
+* @param isAbsolute : 表示 time 是否是绝对时间
+				  true：time 表示自 1970-01-01 00:00:00 UTC 起的纳秒数（即绝对时间），相当于 System.nanoTime()
+				  false：time 是相对时间，表示从当前开始等待多长时间（纳秒）
+* @param time：等待时间，单位是纳秒
+          如果 time 为 0，线程会无限期阻塞，直到被 unpark 唤醒或被中断
+*/
+public native void park(boolean isAbsolute, long time);
+
+//获得对象锁（可重入锁）
+@Deprecated
+public native void monitorEnter(Object o);
+
+//释放对象锁
+@Deprecated
+public native void monitorExit(Object o);
+
+//尝试获取对象锁
+@Deprecated
+public native boolean tryMonitorEnter(Object o);
+````
+
+`monitorEnter`方法用于获得对象锁，`monitorExit`用于释放对象锁，如果对一个没有被`monitorEnter`加锁的对象执行此方法，会抛出`IllegalMonitorStateException`异常。
+
+`tryMonitorEnter`方法尝试获取对象锁，如果成功则返回`true`，反之返回`false`。
+
+#### 3.6.1、典型应用
+
+Java 锁和同步器框架的核心类 `AbstractQueuedSynchronizer` (AQS)，就是通过调用`LockSupport.park()`和`LockSupport.unpark()`实现线程的阻塞和唤醒的，而 `LockSupport` 的 `park`、`unpark` 方法实际是调用 `Unsafe` 的 `park`、`unpark` 方式实现的。
+
+```java
+public static void park(Object blocker) {
+    Thread t = Thread.currentThread();
+    setBlocker(t, blocker);
+    UNSAFE.park(false, 0L);
+    setBlocker(t, null);
+}
+public static void unpark(Thread thread) {
+    if (thread != null)
+        UNSAFE.unpark(thread);
+}
+```
+
+`LockSupport` 的`park`方法调用了 `Unsafe` 的`park`方法来阻塞当前线程，此方法将线程阻塞后就不会继续往后执行，直到有其他线程调用`unpark`方法唤醒当前线程。下面的例子对 `Unsafe` 的这两个方法进行测试：
+
+```java
+public static void main(String[] args) {
+    Thread mainThread = Thread.currentThread();
+    new Thread(()->{
+        try {
+            TimeUnit.SECONDS.sleep(5);
+            System.out.println("subThread try to unpark mainThread");
+            unsafe.unpark(mainThread);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }).start();
+
+    System.out.println("park main mainThread");
+    unsafe.park(false,0L);
+    System.out.println("unpark mainThread success");
+}
+```
+
+程序输出为：
+
+```java
+park main mainThread
+subThread try to unpark mainThread
+unpark mainThread success
+```
+
+程序运行的流程也比较容易看懂，子线程开始运行后先进行睡眠，确保主线程能够调用`park`方法阻塞自己，子线程在睡眠 5 秒后，调用`unpark`方法唤醒主线程，使主线程能继续向下执行。
+
+### 3.7、Class 操作
+
+#### 3.7.1、介绍
+
+`Unsafe` 对`Class`的相关操作主要包括 类加载 和 静态变量的操作方法。
+
+- **静态属性读取相关的方法**
+
+  ```java
+  //获取静态属性的偏移量
+  public native long staticFieldOffset(Field f);
+  
+  //获取静态属性的对象指针
+  /**
+  * 用于获取静态字段的“基础对象”——也就是该字段所属类的 Class 对象对应的内部表示（base），并不是平常在 Java 里理解的“对象实例”。
+  */
+  public native Object staticFieldBase(Field f);
+  
+  //判断类是否需要初始化（用于获取类的静态属性前进行检测）
+  public native boolean shouldBeInitialized(Class<?> c);
+  ```
+
+  创建一个包含静态属性的类，进行测试：
+
+  ```java
+  @Data
+  public class User {
+      public static String name="Hydra";
+      int age;
+  }
+  private void staticTest() throws Exception {
+      User user=new User();
+      // 也可以用下面的语句触发类初始化
+      // 1.
+      // unsafe.ensureClassInitialized(User.class);
+      // 2.
+      // System.out.println(User.name);
+      System.out.println(unsafe.shouldBeInitialized(User.class));
+      
+      Field sexField = User.class.getDeclaredField("name");
+      long fieldOffset = unsafe.staticFieldOffset(sexField);
+      Object fieldBase = unsafe.staticFieldBase(sexField);
+      Object object = unsafe.getObject(fieldBase, fieldOffset);
+      System.out.println(object);
+  }
+  ```
+
+  运行结果：
+
+  ```java
+  false
+  Hydra
+  ```
+
+  在 `Unsafe` 的对象操作中，学习了通过`objectFieldOffset`方法获取对象属性偏移量并基于它对变量的值进行存取，但是它不适用于类中的静态属性，这时候就需要使用`staticFieldOffset`方法。在上面的代码中，只有在获取`Field`对象的过程中依赖到了`Class`，而获取静态变量的属性时不再依赖于`Class`。
+
+  在上面的代码中首先创建一个`User`对象，这是因为如果一个类没有被初始化，那么它的静态属性也不会被初始化，最后获取的字段属性将是`null`。所以在获取静态属性前，需要调用`shouldBeInitialized`方法，判断在获取前是否需要初始化这个类。如果删除创建 User 对象的语句，运行结果会变为：
+
+  ```java
+  true
+  null
+  ```
+
+- **使用`defineClass`方法允许程序在运行时动态地创建一个类**
+
+  ```java
+  public native Class<?> defineClass(String name, byte[] b, int off, int len, ClassLoader loader,ProtectionDomain protectionDomain);
+  ```
+
+  | 参数               | 类型               | 说明                                                         |
+  | ------------------ | ------------------ | ------------------------------------------------------------ |
+  | `name`             | `String`           | 类的全限定名（如 `"com.example.MyClass"`）。可以为 `null`，JVM 会尝试从 class 文件中推导类名。 |
+  | `b`                | `byte[]`           | 字节数组，表示 `.class` 文件的原始字节码内容。               |
+  | `off`              | `int`              | 字节数组中类字节码的起始偏移。通常是 `0`。                   |
+  | `len`              | `int`              | 从 `off` 开始的长度。通常是 `b.length`。                     |
+  | `loader`           | `ClassLoader`      | 用于加载这个类的类加载器。                                   |
+  | `protectionDomain` | `ProtectionDomain` | 权限控制域，用于安全管理。可以传 `null`（会使用默认值）。    |
+
+  在实际使用过程中，可以只传入字节数组、起始字节的下标以及读取的字节长度，默认情况下，类加载器（`ClassLoader`）和保护域（`ProtectionDomain`）来源于调用此方法的实例。下面的例子中实现了反编译生成后的 class 文件的功能：
+
+  ```java
+  private static void defineTest() {
+      String fileName="F:\\workspace\\unsafe-test\\target\\classes\\com\\cn\\model\\User.class";
+      File file = new File(fileName);
+      try(FileInputStream fis = new FileInputStream(file)) {
+          byte[] content=new byte[(int)file.length()];
+          fis.read(content);
+          Class clazz = unsafe.defineClass(null, content, 0, content.length, null, null);
+          Object obj = clazz.newInstance();
+          Object age = clazz.getMethod("getAge").invoke(obj, null);
+          System.out.println(age);
+      } catch (Exception e) {
+          e.printStackTrace();
+      }
+  }
+  ```
+
+  在上面的代码中，首先读取了一个`class`文件并通过文件流将它转化为字节数组，之后使用`defineClass`方法动态的创建了一个类，并在后续完成了它的实例化工作，流程如下图所示，并且通过这种方式创建的类，会**跳过 JVM 的所有安全检查**。
+
+  ![](./../assets/unsafe_class_defineClass.png)
+
+除了`defineClass`方法外，Unsafe 还提供了一个`defineAnonymousClass`方法：
+
+```java
+public native Class<?> defineAnonymousClass(Class<?> hostClass, byte[] data, Object[] cpPatches);
+```
+
+使用该方法可以用来动态的创建一个匿名类，在`Lambda`表达式中就是使用 ASM 动态生成字节码，然后利用该方法定义实现相应的函数式接口的匿名类。在 JDK 15 发布的新特性中，在隐藏类（`Hidden classes`）一条中，指出将在未来的版本中弃用 `Unsafe` 的`defineAnonymousClass`方法。
+
+#### 3.7.2、典型应用
+
+Lambda 表达式实现需要依赖 `Unsafe` 的 `defineAnonymousClass` 方法定义实现相应的函数式接口的匿名类。
+
+### 3.8、系统信息
+
+#### 3.8.1、介绍
+
+这部分包含两个获取系统相关信息的方法。
+
+```java
+//返回系统指针的大小。返回值为4（32位系统）或 8（64位系统）。
+public native int addressSize();
+//内存页的大小，此值为2的幂次方。
+public native int pageSize();
+```
+
+#### 3.8.2、典型应用
+
+这两个方法的应用场景比较少，在`java.nio.Bits`类中，在使用`pageCount`计算所需的内存页的数量时，调用了`pageSize`方法获取内存页的大小。另外，在使用`copySwapMemory`方法拷贝内存时，调用了`addressSize`方法，检测 32 位系统的情况。
+
+## 4、总结
+
+在本文中，我们首先介绍了 `Unsafe` 的基本概念、工作原理，并在此基础上，对它的 API 进行了说明与实践。相信大家通过这一过程，能够发现 `Unsafe` 在某些场景下，确实能够为我们提供编程中的便利。但是回到开头的话题，在使用这些便利时，确实存在着一些安全上的隐患，在我看来，一项技术具有不安全因素并不可怕，可怕的是它在使用过程中被滥用。
+
+尽管之前有传言说会在 Java9 中移除 `Unsafe` 类，不过它还是照样已经存活到了 Java16。按照存在即合理的逻辑，只要使用得当，它还是能给我们带来不少的帮助，因此最后还是建议大家，在使用 `Unsafe` 的过程中一定要做到使用谨慎使用、避免滥用。
