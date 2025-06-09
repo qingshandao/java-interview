@@ -185,3 +185,250 @@ public static void main(String args[])
 
 所以，**装箱过程是通过调用包装器的 valueOf 方法实现的，而拆箱过程是通过调用包装器的 xxxValue 方法实现的。**
 
+## 4、可变长参数
+
+可变参数(`variable arguments`)是在 Java 1.5 中引入的一个特性。它允许一个方法把任意数量的值作为参数。
+
+看下以下可变参数代码，其中 `print` 方法接收可变参数：
+
+```java
+public static void main(String[] args)
+    {
+        print("Holis", "公众号:Hollis", "博客：www.hollischuang.com", "QQ：907607222");
+    }
+
+public static void print(String... strs)
+{
+    for (int i = 0; i < strs.length; i++)
+    {
+        System.out.println(strs[i]);
+    }
+}
+```
+
+反编译后的代码如下：
+
+```java
+ public static void main(String args[])
+{
+    print(new String[] {
+        "Holis", "\u516C\u4F17\u53F7:Hollis", "\u535A\u5BA2\uFF1Awww.hollischuang.com", "QQ\uFF1A907607222"
+    });
+}
+
+public static transient void print(String strs[])
+{
+    for(int i = 0; i < strs.length; i++)
+        System.out.println(strs[i]);
+
+}
+```
+
+从反编译后代码可以看出，可变参数在被使用的时候，他首先会创建一个数组，数组的长度就是调用该方法时，传递的实参的个数，然后把参数值全部放到这个数组当中，再把这个数组作为参数传递到被调用的方法中。（注：`trasient` 仅在修饰成员变量时有意义，此处 “修饰方法” 是由于在 javassist 中使用相同数值分别表示 `trasient` 以及 `vararg`，见 [此处](https://github.com/jboss-javassist/javassist/blob/7302b8b0a09f04d344a26ebe57f29f3db43f2a3e/src/main/javassist/bytecode/AccessFlag.java#L32)。）
+
+## 5、枚举
+
+Java SE5 提供了一种新的类型-Java 的枚举类型，关键字`enum`可以将一组具名的值的有限集合创建为一种新的类型，而这些具名的值可以作为常规的程序组件使用，这是一种非常有用的功能。
+
+要想看源码，首先得有一个类吧，那么枚举类型到底是什么类呢？是`enum`吗？答案很明显不是，`enum`就和`class`一样，只是一个关键字，他并不是一个类，那么枚举是由什么类维护的呢，简单的写一个枚举：
+
+```java
+public enum t {
+    SPRING,SUMMER;
+}
+```
+
+然后使用反编译，看看这段代码到底是怎么实现的，反编译后代码内容如下：
+
+```java
+public final class T extends Enum
+{
+    private T(String s, int i)
+    {
+        super(s, i);
+    }
+    public static T[] values()
+    {
+        T at[];
+        int i;
+        T at1[];
+        System.arraycopy(at = ENUM$VALUES, 0, at1 = new T[i = at.length], 0, i);
+        return at1;
+    }
+
+    public static T valueOf(String s)
+    {
+        return (T)Enum.valueOf(demo/T, s);
+    }
+
+    public static final T SPRING;
+    public static final T SUMMER;
+    private static final T ENUM$VALUES[];
+    static
+    {
+        SPRING = new T("SPRING", 0);
+        SUMMER = new T("SUMMER", 1);
+        ENUM$VALUES = (new T[] {
+            SPRING, SUMMER
+        });
+    }
+}
+```
+
+通过反编译后代码我们可以看到，`public final class T extends Enum`，说明，该类是继承了`Enum`类的，同时`final`关键字告诉我们，这个类也是不能被继承的。
+
+**当使用`enum`来定义一个枚举类型的时候，编译器会自动创建一个`final`类型的类继承`Enum`类，所以枚举类型不能被继承。**
+
+## 6、内部类
+
+内部类又称为嵌套类，可以把内部类理解为外部类的一个普通成员。
+
+**内部类之所以也是语法糖，是因为它仅仅是一个编译时的概念，`outer.java`里面定义了一个内部类`inner`，一旦编译成功，就会生成两个完全不同的`.class`文件了，分别是`outer.class`和`outer$inner.class`。所以内部类的名字完全可以和它的外部类名字相同。**
+
+```java
+public class OutterClass {
+    private String userName;
+
+    public String getUserName() {
+        return userName;
+    }
+
+    public void setUserName(String userName) {
+        this.userName = userName;
+    }
+
+    public static void main(String[] args) {
+
+    }
+
+    class InnerClass{
+        private String name;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+    }
+}
+```
+
+以上代码编译后会生成两个 class 文件：`OutterClass$InnerClass.class`、`OutterClass.class` 。当我们尝试对`OutterClass.class`文件进行反编译的时候，命令行会打印以下内容：`Parsing OutterClass.class...Parsing inner class OutterClass$InnerClass.class... Generating OutterClass.jad` 。他会把两个文件全部进行反编译，然后一起生成一个`OutterClass.jad`文件。文件内容如下：
+
+```java
+public class OutterClass
+{
+    class InnerClass
+    {
+        public String getName()
+        {
+            return name;
+        }
+        public void setName(String name)
+        {
+            this.name = name;
+        }
+        private String name;
+        final OutterClass this$0;
+
+        InnerClass()
+        {
+            this.this$0 = OutterClass.this;
+            super();
+        }
+    }
+
+    public OutterClass()
+    {
+    }
+    public String getUserName()
+    {
+        return userName;
+    }
+    public void setUserName(String userName){
+        this.userName = userName;
+    }
+    public static void main(String args1[])
+    {
+    }
+    private String userName;
+}
+```
+
+**为什么内部类可以使用外部类的 private 属性**：
+
+我们在 InnerClass 中增加一个方法，打印外部类的 userName 属性
+
+```java
+//省略其他属性
+public class OutterClass {
+    private String userName;
+    ......
+    class InnerClass{
+    ......
+        public void printOut(){
+            System.out.println("Username from OutterClass:"+userName);
+        }
+    }
+}
+
+// 此时，使用javap -p命令对OutterClass反编译结果：
+public classOutterClass {
+    private String userName;
+    ......
+    static String access$000(OutterClass);
+}
+// 此时，InnerClass的反编译结果：
+class OutterClass$InnerClass {
+    final OutterClass this$0;
+    ......
+    public void printOut();
+}
+```
+
+实际上，在编译完成之后，inner 实例内部会有指向 outer 实例的引用`this$0`，但是简单的`outer.name`是无法访问 private 属性的，因此，从反编译的结果可以看到，outer 中会有一个桥方法`static String access$000(OutterClass)`，恰好返回 String 类型，即 userName 属性。正是通过这个方法实现内部类访问外部类私有属性。所以反编译后的`printOut()`方法大致如下：
+
+```java
+public void printOut() {
+    System.out.println("Username from OutterClass:" + OutterClass.access$000(this.this$0));
+}
+```
+
+补充：
+
+1. 匿名内部类、局部内部类、静态内部类也是通过桥方法来获取 private 属性。
+2. 静态内部类没有`this$0`的引用
+3. 匿名内部类、局部内部类通过复制使用局部变量，该变量初始化之后就不能被修改。以下是一个案例：
+
+```java
+public class OutterClass {
+    private String userName;
+
+    public void test(){
+        //这里i初始化为1后就不能再被修改
+        int i=1;
+        class Inner{
+            public void printName(){
+                System.out.println(userName);
+                System.out.println(i);
+            }
+        }
+    }
+}
+```
+
+反编译后：
+
+```java
+//javap命令反编译Inner的结果
+//i被复制进内部类，且为final
+class OutterClass$1Inner {
+  final int val$i;
+  final OutterClass this$0;
+  OutterClass$1Inner();
+  public void printName();
+}
+```
+
