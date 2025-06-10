@@ -396,10 +396,119 @@ public void printOut() {
 }
 ```
 
-补充：
+
+
+⚠**高版本JDK会进行 Nest-Based 编译优化：**
+
+✅ **为什么可能不会生成** `access$000()`？
+
+虽然在 Java 8 中 **内部类访问外部类私有字段一定会生成 `access$000()`**，但在 **Java 9 及以后版本**：
+
+> 内部类与外部类在同一个 `.java` 文件中，且编译器可以“看穿”结构时，就 **不需要通过桥接方法访问私有成员**。
+
+这叫做：
+
+➤ **嵌套类直接访问私有成员优化**（Nest-Based Access Control）
+
+* Java 11 开始默认启用（JEP 181）。
+* 内部类和外部类会编译为属于 **同一个 Nest（嵌套组）**。
+* 编译器借助 JVM 新指令 `NestHost/NestMembers` 支持跨类访问私有成员，**无需桥接方法**！
+
+✅ 如何验证是否启用了 Nest-Based 访问优化？
+
+可以用 `javap -v`（verbose 模式）来验证：
+
+```bash
+javap -v OuterClass.class
+```
+
+输出中会看到：
+
+```bash
+NestMembers:
+  com.gc.test.syntactic_sugar.inner_class.OuterClass$InnerClass
+```
+
+和：
+
+```bash
+javap -v OuterClass$InnerClass.class
+```
+
+会看到：
+
+```bash
+NestHost: class com.gc.test.syntactic_sugar.inner_class.OuterClass
+```
+
+这说明两个类属于同一个 Nest，JVM 将允许它们**直接访问彼此私有成员**，因此不再需要 `access$000()` 这种桥接方法。
+
+✅ **如何强制生成** `access$000()`？
+
+- 方法 1：使用旧版本 JDK 编译
+
+	```bash
+	javac --release 8 OuterClass.java
+	```
+
+- 方法2：关闭 nest 优化（JDK 编译器不直接支持）
+
+	可以用第三方工具（比如 ASM 修改类文件），但这通常不推荐。
+
+| 情况                                    | 是否生成 `access$000()` |
+| --------------------------------------- | ----------------------- |
+| Java 8 及以下                           | ✅ 是                    |
+| Java 11+（默认）                        | ❌ 否（使用 Nest 优化）  |
+| 使用 `--release 8` 编译                 | ✅ 是                    |
+| 使用 `-target 1.8` 但没设置 `--release` | ⚠️ 不一定可靠            |
+
+
+
+**补充：**
 
 1. 匿名内部类、局部内部类、静态内部类也是通过桥方法来获取 private 属性。
-2. 静态内部类没有`this$0`的引用
+
+	> - 如果静态内部类要访问外部类的`private static`属性，需要桥方法（合成方法）进行访问
+	>
+	> 	- 使用案例：
+	>
+	> 		```java
+	> 		public class OuterClass {
+	> 		    private static String userName = "Alice";
+	> 		    public static class InnerClass {
+	> 		        public void printOut() {
+	> 		            System.out.println("Username: " + userName);
+	> 		        }
+	> 		    }
+	> 		}
+	> 		```
+	>
+	> 	- 反编译后如下：
+	>
+	> 		```java
+	> 		public class com.gc.test.syntactic_sugar.inner_class.OuterClass {
+	> 		  private static java.lang.String userName;
+	> 		  public com.gc.test.syntactic_sugar.inner_class.OuterClass();
+	> 		    		
+	> 		  //  InnerClass.printOut() 调用的是 OuterClass.access$000() 来访问 userName。 
+	> 		  static java.lang.String access$000();
+	> 		  static {};
+	> 		}
+	> 		```
+	>
+	> - 静态内部类可以**直接访问**外部类的`public static`属性，不需要任何合成方法或桥方法，也不会生成 `access$000()` 
+	>
+	> | 成员修饰               | 是否 static | 是否 private | 是否需要合成方法                       |
+	> | ---------------------- | ----------- | ------------ | -------------------------------------- |
+	> | `private static`       | ✅ 是        | ✅ 是         | ✅ 需要合成方法                         |
+	> | `public static`        | ✅ 是        | ❌ 否         | ❌ 不需要，直接访问                     |
+	> | `private`（非 static） | ❌ 否        | ✅ 是         | ✅ 需要合成方法 + `this$0`              |
+	> | `public`（非 static）  | ❌ 否        | ❌ 否         | ✅ 需要 `this$0` 引用，但不需要合成方法 |
+	>
+	> 
+
+2. 静态内部类没有`this$0`的引用；
+
 3. 匿名内部类、局部内部类通过复制使用局部变量，该变量初始化之后就不能被修改。以下是一个案例：
 
 ```java
@@ -432,3 +541,149 @@ class OutterClass$1Inner {
 }
 ```
 
+
+**总结**
+
+| 类别         | 是否有名字 | 是否静态 | 是否依赖外部类实例 | 定义位置                  |
+| ------------ | ---------- | -------- | ------------------ | ------------------------- |
+| 1️⃣ 成员内部类 | ✅ 有       | ❌ 否     | ✅ 是               | 外部类中定义的普通类      |
+| 2️⃣ 静态内部类 | ✅ 有       | ✅ 是     | ❌ 否               | 外部类中定义，加 `static` |
+| 3️⃣ 局部内部类 | ✅ 有       | ❌ 否     | ✅ 是               | 方法、代码块中定义        |
+| 4️⃣ 匿名内部类 | ❌ 没有     | ❌ 否     | ✅ 是               | 定义时立即创建对象        |
+
+## 7、条件编译
+
+—般情况下，程序中的每一行代码都要参加编译。但有时候出于对程序代码优化的考虑，希望只对其中一部分内容进行编译，此时就需要在程序中加上条件，让编译器只对满足条件的代码进行编译，将不满足条件的代码舍弃，这就是条件编译。
+
+如在 C 或 CPP 中，可以通过预处理语句来实现条件编译。其实在 Java 中也可实现条件编译。先来看一段代码：
+
+```java
+public class ConditionalCompilation {
+    public static void main(String[] args) {
+        final boolean DEBUG = true;
+        if(DEBUG) {
+            System.out.println("Hello, DEBUG!");
+        }
+
+        final boolean ONLINE = false;
+
+        if(ONLINE){
+            System.out.println("Hello, ONLINE!");
+        }
+    }
+}
+```
+
+反编译后代码如下：
+
+```java
+public class ConditionalCompilation
+{
+
+    public ConditionalCompilation()
+    {
+    }
+
+    public static void main(String args[])
+    {
+        boolean DEBUG = true;
+        System.out.println("Hello, DEBUG!");
+        boolean ONLINE = false;
+    }
+}
+```
+
+首先，在反编译后的代码中没有`System.out.println("Hello, ONLINE!");`，这其实就是条件编译。当`if(ONLINE)`为 false 的时候，编译器就没有对其内的代码进行编译。
+
+所以，**Java 语法的条件编译，是通过判断条件为常量的 if 语句实现的。其原理也是 Java 语言的语法糖。根据 if 判断条件的真假，编译器直接把分支为 false 的代码块消除。通过该方式实现的条件编译，必须在方法体内实现，而无法在整个 Java 类的结构或者类的属性上进行条件编译，这与 C/C++的条件编译相比，确实更有局限性。在 Java 语言设计之初并没有引入条件编译的功能，虽有局限，但是总比没有更强。**
+
+## 8、断言
+
+在 Java 中，`assert`关键字是从 JAVA SE 1.4 引入的，为了避免和老版本的 Java 代码中使用了`assert`关键字导致错误，Java 在执行的时候默认是不启动断言检查的（这个时候，所有的断言语句都将忽略！），如果要开启断言检查，则需要用开关`-enableassertions`或`-ea`来开启。
+
+### 8.1、语法：
+
+```java
+assert 条件表达式;
+```
+
+或
+
+```java
+assert 条件表达式 : 错误信息;
+```
+
+如果表达式的结果为 `false`，Java 就会抛出一个 `AssertionError` 异常，并（可选）输出你提供的错误信息。
+
+### 8.2、案例
+
+看一段包含断言的代码：
+
+```java
+public class DemoTest {
+    public static void main(String[] args) {
+        int age = 10;
+
+        assert age > 20 : "年龄不大于20";
+
+        System.out.println("age = " + age);
+    }
+}
+```
+
+输出：
+
+```java
+Exception in thread "main" java.lang.AssertionError: 年龄不大于20
+	at com.gc.test.syntactic_sugar.assertion.DemoTest.main(DemoTest.java:7)
+```
+
+可见，条件不满足后，程序抛出异常并退出，并未执行后续的代码。
+
+### 8.3、分析
+
+看一段包含断言的代码：
+
+```java
+public class AssertTest {
+    public static void main(String args[]) {
+        int a = 1;
+        int b = 1;
+        assert a == b;
+        System.out.println("公众号：Hollis");
+        assert a != b : "Hollis";
+        System.out.println("博客：www.hollischuang.com");
+    }
+}
+```
+
+反编译后代码如下：
+
+```java
+public class AssertTest {
+   public AssertTest()
+    {
+    }
+    public static void main(String args[])
+{
+    int a = 1;
+    int b = 1;
+    if(!$assertionsDisabled && a != b)
+        throw new AssertionError();
+    System.out.println("\u516C\u4F17\u53F7\uFF1AHollis");
+    if(!$assertionsDisabled && a == b)
+    {
+        throw new AssertionError("Hollis");
+    } else
+    {
+        System.out.println("\u535A\u5BA2\uFF1Awww.hollischuang.com");
+        return;
+    }
+}
+
+static final boolean $assertionsDisabled = !com/hollis/suguar/AssertTest.desiredAssertionStatus();
+
+}
+```
+
+很明显，反编译之后的代码要比我们自己的代码复杂的多。所以，使用了 assert 这个语法糖我们节省了很多代码。**其实断言的底层实现就是 if 语言，如果断言结果为 true，则什么都不做，程序继续执行，如果断言结果为 false，则程序抛出 AssertError 来打断程序的执行。**`-enableassertions`会设置$assertionsDisabled 字段的值。
