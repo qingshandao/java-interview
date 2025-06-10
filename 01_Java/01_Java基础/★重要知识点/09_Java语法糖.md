@@ -601,7 +601,7 @@ public class ConditionalCompilation
 
 在 Java 中，`assert`关键字是从 JAVA SE 1.4 引入的，为了避免和老版本的 Java 代码中使用了`assert`关键字导致错误，Java 在执行的时候默认是不启动断言检查的（这个时候，所有的断言语句都将忽略！），如果要开启断言检查，则需要用开关`-enableassertions`或`-ea`来开启。
 
-### 8.1、语法：
+### 8.1、语法
 
 ```java
 assert 条件表达式;
@@ -687,3 +687,264 @@ static final boolean $assertionsDisabled = !com/hollis/suguar/AssertTest.desired
 ```
 
 很明显，反编译之后的代码要比我们自己的代码复杂的多。所以，使用了 assert 这个语法糖我们节省了很多代码。**其实断言的底层实现就是 if 语言，如果断言结果为 true，则什么都不做，程序继续执行，如果断言结果为 false，则程序抛出 AssertError 来打断程序的执行。**`-enableassertions`会设置$assertionsDisabled 字段的值。
+
+## 9、数值字面量
+
+在 java 7 中，数值字面量，不管是整数，还是浮点数，都允许在数字之间插入任意多个下划线。这些下划线不会对字面量的数值产生影响，目的就是方便阅读。
+
+比如：
+
+```java
+public class Test {
+    public static void main(String... args) {
+        int i = 10_000;
+        System.out.println(i);
+    }
+}
+```
+
+反编译后：
+
+```java
+public class Test
+{
+  public static void main(String[] args)
+  {
+    int i = 10000;
+    System.out.println(i);
+  }
+}
+```
+
+反编译后就是把`_`删除了。也就是说 **编译器并不认识在数字字面量中的`_`，需要在编译阶段把他去掉。**
+
+## 10、for-each
+
+增强 for 循环（`for-each`）日常开发经常会用到的，它会比 for 循环要少写很多代码，那么这个语法糖背后是如何实现的呢？
+
+```java
+public static void main(String... args) {
+    String[] strs = {"Hollis", "公众号：Hollis", "博客：www.hollischuang.com"};
+    for (String s : strs) {
+        System.out.println(s);
+    }
+    List<String> strList = ImmutableList.of("Hollis", "公众号：Hollis", "博客：www.hollischuang.com");
+    for (String s : strList) {
+        System.out.println(s);
+    }
+}
+```
+
+反编译后代码如下：
+
+```java
+public static transient void main(String args[])
+{
+    String strs[] = {
+        "Hollis", "\u516C\u4F17\u53F7\uFF1AHollis", "\u535A\u5BA2\uFF1Awww.hollischuang.com"
+    };
+    String args1[] = strs;
+    int i = args1.length;
+    for(int j = 0; j < i; j++)
+    {
+        String s = args1[j];
+        System.out.println(s);
+    }
+
+    List strList = ImmutableList.of("Hollis", "\u516C\u4F17\u53F7\uFF1AHollis", "\u535A\u5BA2\uFF1Awww.hollischuang.com");
+    String s;
+    for(Iterator iterator = strList.iterator(); iterator.hasNext(); System.out.println(s))
+        s = (String)iterator.next();
+
+}
+```
+
+代码很简单，**for-each 的实现原理其实就是使用了普通的 for 循环和迭代器。**
+
+🚫 **不要使用 `for-each` 删除元素**，否则会抛出 `ConcurrentModificationException`。
+
+> 如果你在遍历过程中**直接修改集合结构**（如 `list.remove()`），会导致迭代器内部的状态和集合的实际结构**不一致**
+>
+> ```java
+> List<String> list = new ArrayList<>();
+> list.add("A");
+> list.add("B");
+> list.add("C");
+> 
+> for (String item : list) {
+>     if (item.equals("B")) {
+>         list.remove(item);  // ❌ 抛出 ConcurrentModificationException
+>     }
+> }
+> ```
+>
+> 等效于底层代码：
+>
+> ```java
+> Iterator<String> it = list.iterator();
+> while (it.hasNext()) {
+>     String item = it.next();
+>     if (item.equals("B")) {
+>         list.remove(item);  // ❌ 修改了集合，迭代器没同步更新，出错
+>     }
+> }
+> ```
+>
+> ✅ 正确做法
+>
+> - 方法1：使用显式 Iterator，并通过它的 `remove()` 方法
+>
+> 	```java
+> 	Iterator<String> it = list.iterator();
+> 	while (it.hasNext()) {
+> 	    String item = it.next();
+> 	    if (item.equals("B")) {
+> 	        it.remove();  // ✅ 正确删除
+> 	    }
+> 	}
+> 	```
+>
+> - 方法2：使用 Java 8+ `removeIf()`（推荐）
+>
+> 	```java
+> 	list.removeIf(item -> item.equals("B"));
+> 	```
+>
+> ⚙️ 原理解释：modCount 与 fail-fast
+>
+> Java 的大多数集合（如 `ArrayList`、`HashMap`）使用一个叫做 `modCount` 的变量来追踪结构性修改。
+>
+> * `Iterator` 在创建时会记录集合的 `modCount`
+> * 每次调用 `next()` 时都会检查 `modCount` 是否变化
+> * 如果你通过 **集合自身（如 list.remove）** 修改了数据，而不是通过 `Iterator`，则 `modCount` 会变，但 `Iterator` 的版本没更新
+> * 于是抛出 `ConcurrentModificationException`（fail-fast 机制）
+
+## 11、try-with-resource
+
+Java 里，对于文件操作 IO 流、数据库连接等开销非常昂贵的资源，用完之后必须及时通过 close 方法将其关闭，否则资源会一直处于打开状态，可能会导致内存泄露等问题。
+
+关闭资源的常用方式就是在`finally`块里是释放，即调用`close`方法。比如，经常会写这样的代码：
+
+```java
+public static void main(String[] args) {
+    BufferedReader br = null;
+    try {
+        String line;
+        br = new BufferedReader(new FileReader("d:\\hollischuang.xml"));
+        while ((line = br.readLine()) != null) {
+            System.out.println(line);
+        }
+    } catch (IOException e) {
+        // handle exception
+    } finally {
+        try {
+            if (br != null) {
+                br.close();
+            }
+        } catch (IOException ex) {
+            // handle exception
+        }
+    }
+}
+```
+
+从 Java 7 开始，jdk 提供了一种更好的方式关闭资源，使用`try-with-resources`语句，改写一下上面的代码，效果如下：
+
+```java
+public static void main(String... args) {
+    try (BufferedReader br = new BufferedReader(new FileReader("d:\\ hollischuang.xml"))) {
+        String line;
+        while ((line = br.readLine()) != null) {
+            System.out.println(line);
+        }
+    } catch (IOException e) {
+        // handle exception
+    }
+}
+```
+
+这简直是一大福音啊，虽然之前一般使用`IOUtils`去关闭流，并不会使用在`finally`中写很多代码的方式，但是这种新的语法糖看上去好像优雅很多呢。看下他的背后：
+
+```java
+public static transient void main(String args[])
+    {
+        BufferedReader br;
+        Throwable throwable;
+        br = new BufferedReader(new FileReader("d:\\ hollischuang.xml"));
+        throwable = null;
+        String line;
+        try
+        {
+            while((line = br.readLine()) != null)
+                System.out.println(line);
+        }
+        catch(Throwable throwable2)
+        {
+            throwable = throwable2;
+            throw throwable2;
+        }
+        if(br != null)
+            if(throwable != null)
+                try
+                {
+                    br.close();
+                }
+                catch(Throwable throwable1)
+                {
+                    throwable.addSuppressed(throwable1);
+                }
+            else
+                br.close();
+            break MISSING_BLOCK_LABEL_113;
+            Exception exception;
+            exception;
+            if(br != null)
+                if(throwable != null)
+                    try
+                    {
+                        br.close();
+                    }
+                    catch(Throwable throwable3)
+                      {
+                        throwable.addSuppressed(throwable3);
+                    }
+                else
+                    br.close();
+        throw exception;
+        IOException ioexception;
+        ioexception;
+    }
+}
+```
+
+**其实背后的原理也很简单，那些我们没有做的关闭资源的操作，编译器都帮我们做了。所以，再次印证了，语法糖的作用就是方便程序员的使用，但最终还是要转成编译器认识的语言。**
+
+## 12、Lambda 表达式
+
+关于 lambda 表达式，有人可能会有质疑，因为网上有人说他并不是语法糖。其实我想纠正下这个说法。**Lambda 表达式不是匿名内部类的语法糖，但是他也是一个语法糖。实现方式其实是依赖了几个 JVM 底层提供的 lambda 相关 api。**
+
+先来看一个简单的 lambda 表达式。遍历一个 list：
+
+```java
+public static void main(String... args) {
+    List<String> strList = ImmutableList.of("Hollis", "公众号：Hollis", "博客：www.hollischuang.com");
+
+    strList.forEach( s -> { System.out.println(s); } );
+}
+```
+
+为啥说他并不是内部类的语法糖呢，前面讲内部类我们说过，内部类在编译之后会有两个 class 文件，但是，包含 lambda 表达式的类编译后只有一个文件。
+
+反编译后代码如下:
+
+```java
+public static /* varargs */ void main(String ... args) {
+    ImmutableList strList = ImmutableList.of((Object)"Hollis", (Object)"\u516c\u4f17\u53f7\uff1aHollis", (Object)"\u535a\u5ba2\uff1awww.hollischuang.com");
+    strList.forEach((Consumer<String>)LambdaMetafactory.metafactory(null, null, null, (Ljava/lang/Object;)V, lambda$main$0(java.lang.String ), (Ljava/lang/String;)V)());
+}
+
+private static /* synthetic */ void lambda$main$0(String s) {
+    System.out.println(s);
+}
+```
+
