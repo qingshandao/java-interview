@@ -489,7 +489,7 @@ NestHost: class com.gc.test.syntactic_sugar.inner_class.OuterClass
 	> 		public class com.gc.test.syntactic_sugar.inner_class.OuterClass {
 	> 		  private static java.lang.String userName;
 	> 		  public com.gc.test.syntactic_sugar.inner_class.OuterClass();
-	> 		    		
+	> 		    				
 	> 		  //  InnerClass.printOut() 调用的是 OuterClass.access$000() 来访问 userName。 
 	> 		  static java.lang.String access$000();
 	> 		  static {};
@@ -948,3 +948,269 @@ private static /* synthetic */ void lambda$main$0(String s) {
 }
 ```
 
+可以看到，在`forEach`方法中，其实是调用了`java.lang.invoke.LambdaMetafactory#metafactory`方法，该方法的第四个参数 `implMethod` 指定了方法实现。可以看到这里其实是调用了一个`lambda$main$0`方法进行了输出。
+
+再来看一个稍微复杂一点的，先对 List 进行过滤，然后再输出：
+
+```java
+public static void main(String... args) {
+    List<String> strList = ImmutableList.of("Hollis", "公众号：Hollis", "博客：www.hollischuang.com");
+
+    List HollisList = strList.stream().filter(string -> string.contains("Hollis")).collect(Collectors.toList());
+
+    HollisList.forEach( s -> { System.out.println(s); } );
+}
+```
+
+反编译后代码如下：
+
+```java
+public static /* varargs */ void main(String ... args) {
+    ImmutableList strList = ImmutableList.of((Object)"Hollis", (Object)"\u516c\u4f17\u53f7\uff1aHollis", (Object)"\u535a\u5ba2\uff1awww.hollischuang.com");
+    List<Object> HollisList = strList.stream().filter((Predicate<String>)LambdaMetafactory.metafactory(null, null, null, (Ljava/lang/Object;)Z, lambda$main$0(java.lang.String ), (Ljava/lang/String;)Z)()).collect(Collectors.toList());
+    HollisList.forEach((Consumer<Object>)LambdaMetafactory.metafactory(null, null, null, (Ljava/lang/Object;)V, lambda$main$1(java.lang.Object ), (Ljava/lang/Object;)V)());
+}
+
+private static /* synthetic */ void lambda$main$1(Object s) {
+    System.out.println(s);
+}
+
+private static /* synthetic */ boolean lambda$main$0(String string) {
+    return string.contains("Hollis");
+}
+```
+
+两个 lambda 表达式分别调用了`lambda$main$1`和`lambda$main$0`两个方法。
+
+**所以，lambda 表达式的实现其实是依赖了一些底层的 api，在编译阶段，编译器会把 lambda 表达式进行解糖，转换成调用内部 api 的方式。**
+
+### 12.1、补充 - 函数式接口
+
+#### 12.1.1、 `Predicate<T>` 接口
+
+📌 **定义**：
+
+```java
+@FunctionalInterface
+public interface Predicate<T> {
+    boolean test(T t);
+}
+```
+
+📌 **用途：**
+
+`Predicate<T>` 表示一个接收 **一个参数** 并返回 `boolean` 的函数。
+
+适用于判断、过滤，例如 `.filter(...)`：
+
+```java
+Predicate<String> p = str -> str.startsWith("A");
+
+System.out.println(p.test("Apple")); // true
+System.out.println(p.test("Banana")); // false
+```
+
+在 `Stream` 中的用法：
+
+```java
+Predicate<String> p = s -> s.contains("Hollis");
+
+list.stream().filter(p);
+```
+
+#### 12.1.2、 `Consumer<T>` 接口
+
+📌 定义：
+
+```java
+@FunctionalInterface
+public interface Consumer<T> {
+    void accept(T t);
+}
+```
+
+📌 用途：
+
+`Consumer<T>` 表示一个接收 **一个参数** 但不返回值的函数，常用于执行某种操作（副作用），例如 `.forEach(...)`：
+
+```java
+Consumer<String> c = str -> System.out.println(str);
+
+c.accept("Hello"); // 输出：Hello
+```
+
+在 `Stream` 中的用法：
+
+```java
+list.stream().forEach(s -> System.out.println(s));
+```
+
+#### 12.1.3、🧠 延伸：常见函数式接口一览
+
+| 接口名              | 方法签名            | 说明                    |
+| ------------------- | ------------------- | ----------------------- |
+| `Predicate<T>`      | `boolean test(T t)` | 断言（返回 true/false） |
+| `Consumer<T>`       | `void accept(T t)`  | 消费（处理但不返回）    |
+| `Function<T,R>`     | `R apply(T t)`      | 转换函数                |
+| `Supplier<T>`       | `T get()`           | 无参供给，返回一个值    |
+| `BiFunction<T,U,R>` | `R apply(T t, U u)` | 两个参数转一个结果      |
+
+# 三、可能遇到的坑
+
+## 1、泛型
+
+### 1.1、重载遇到泛型
+
+```java
+public class GenericTypes {
+
+    public static void method(List<String> list) {
+        System.out.println("invoke method(List<String> list)");
+    }
+
+    public static void method(List<Integer> list) {
+        System.out.println("invoke method(List<Integer> list)");
+    }
+}
+```
+
+上面这段代码，有两个重载的函数，因为他们的参数类型不同，一个是`List<String>`另一个是`List<Integer>` ，但是，这段代码是编译通不过的。因为我们前面讲过，参数`List<Integer>`和`List<String>`编译之后都被擦除了，变成了一样的原生类型 List，擦除动作导致这两个方法的特征签名变得一模一样。
+
+✅ **解决方案：**
+
+由于Java不支持仅通过泛型参数重载方法，可以采用以下方式之一解决：
+
+- 改变方法名以区分不同类型的参数；
+- 使用通配符或父类作为参数统一处理；
+- 添加额外参数以区分方法重载。
+
+### 1.2、泛型遇到 `catch`
+
+泛型的类型参数不能用在 Java 异常处理的 catch 语句中。因为异常处理是由 JVM 在运行时刻来进行的。由于类型信息被擦除，JVM 是无法区分两个异常类型`MyException<String>`和`MyException<Integer>`的
+
+❌ 错误示例：尝试使用带泛型的异常捕获（**编译不通过**）
+
+```java
+class MyException<T> extends Exception { // ❌ 编译错误：Exception不是泛型类，无法被MyException<T> 继承
+    public MyException(String message) {
+        super(message);
+    }
+}
+
+public class GenericExceptionTest {
+    public static void main(String[] args) {
+        try {
+            throw new MyException<String>("String exception");
+        } catch (MyException<String> e) {  // ❌ 编译错误：非法的捕获类型
+            System.out.println("Caught MyException<String>");
+        }
+    }
+}
+```
+
+✅ 正确做法（只能捕获原始类型）
+
+由于泛型信息在运行时已经被擦除，JVM 无法判断 `T` 是什么，所以只能捕获原始类型：
+
+```java
+public class GenericExceptionTest {
+    public static void main(String[] args) {
+        try {
+            throw new MyException<String>("String exception");
+        } catch (MyException e) {  // ✅ 只能使用原始类型捕获
+            System.out.println("Caught MyException: " + e.getMessage());
+        }
+    }
+}
+```
+
+### 1.3、当泛型类包含静态变量
+
+```java
+public class StaticTest{
+    public static void main(String[] args){
+        GT<Integer> gti = new GT<Integer>();
+        gti.var=1;
+        GT<String> gts = new GT<String>();
+        gts.var=2;
+        System.out.println(gti.var);
+    }
+}
+class GT<T>{
+    public static int var=0;
+    public void nothing(T x){}
+}
+```
+
+以上代码输出结果为：`2`
+
+可能会误认为泛型类是不同的类，对应不同的字节码，其实由于经过类型擦除，所有的泛型类实例都关联到同一份字节码上，泛型类的静态变量是共享的。上面例子里的`GT<Integer>.var`和`GT<String>.var`其实是一个变量。
+
+## 2、自动装箱拆箱
+
+### 2.1、对象相等比较
+
+```java
+public static void main(String[] args) {
+    Integer a = 1000;
+    Integer b = 1000;
+    Integer c = 100;
+    Integer d = 100;
+    System.out.println("a == b is " + (a == b));
+    System.out.println(("c == d is " + (c == d)));
+}
+```
+
+输出结果：
+
+```
+a == b is false
+c == d is true
+```
+
+在 Java 5 中，在 Integer 的操作上引入了一个新功能来节省内存和提高性能。整型对象通过使用相同的对象引用实现了缓存和重用。
+
+> 适用于整数值区间-128 至 +127。
+>
+> 只适用于自动装箱。使用构造函数创建对象不适用。
+
+## 3、增强 for 循环
+
+```java
+for (Student stu : students) {
+    if (stu.getId() == 2)
+        students.remove(stu);
+}
+```
+
+会抛出`ConcurrentModificationException`异常。
+
+Iterator 是工作在一个独立的线程中，并且拥有一个 mutex 锁。 Iterator 被创建之后会建立一个指向原来对象的单链索引表，当原来的对象数量发生变化时，这个索引表的内容不会同步改变，所以当索引指针往后移动的时候就找不到要迭代的对象，所以按照 fail-fast 原则 Iterator 会马上抛出`java.util.ConcurrentModificationException`异常。
+
+这违反了迭代器的一致性规则：
+
+* Java 的 for-each 本质上是基于 **Iterator** 实现的。
+* `Iterator` 在遍历时维护了一个结构修改计数器（modCount）。
+* 如果你在使用 `Iterator` 遍历的同时，直接对列表进行了结构修改（例如：`remove`、`add` 等），modCount 不一致，就会抛出 `ConcurrentModificationException`。
+
+所以 `Iterator` 在工作的时候是不允许被迭代的对象被改变的。但可以使用 `Iterator` 本身的方法`remove()`来删除对象，`Iterator.remove()` 方法会在删除当前迭代对象的同时维护索引的一致性。
+
+```java
+Iterator<Student> iterator = students.iterator();
+while (iterator.hasNext()) {
+    Student stu = iterator.next();
+    if (stu.getId() == 2) {
+        iterator.remove();  // ✅ 使用 iterator.remove() 是安全的
+    }
+}
+```
+
+或（Java8 +）：
+
+```java
+students.removeIf(stu -> stu.getId() == 2);
+```
+
+🔍 **为什么同样是迭代器，增强 for 无法正确删除，直接使用迭代器就行？**
+
+增强 for 是基于迭代器实现的，但它“屏蔽”了 Iterator 的操作权限，无法显式调用 `iterator.remove()`，所以一旦直接修改集合，就破坏了迭代器的一致性，导致异常。
