@@ -272,7 +272,49 @@ public interface RandomAccess {
 
 `ArrayList` 实现了 `RandomAccess` 接口， 而 `LinkedList` 没有实现。为什么呢？我觉得还是和底层数据结构有关！`ArrayList` 底层是数组，而 `LinkedList` 底层是链表。数组天然支持随机访问，时间复杂度为 O(1)，所以称为快速随机访问。链表需要遍历到特定位置才能访问特定位置的元素，时间复杂度为 O(n)，所以不支持快速随机访问。`ArrayList` 实现了 `RandomAccess` 接口，就表明了他具有快速随机访问功能。 `RandomAccess` 接口只是标识，并不是说 `ArrayList` 实现 `RandomAccess` 接口才具有快速随机访问功能的！
 
+## 9、ArrayList 的扩容机制
 
+详见这篇文章: [ArrayList 扩容机制分析](./★源码分析/01ArrayList源码分析.md)。
 
+## 10、集合中的 fail-fast 和 fail-safe 是什么
 
+关于`fail-fast`引用`medium`中一篇文章关于`fail-fast`和`fail-safe`的说法：
+
+> 快速失败的思想即针对可能发生的异常进行提前表明故障并停止运行，通过尽早的发现和停止错误，降低故障系统级联的风险。
+
+在`java.util`包下的大部分集合是不支持线程安全的，为了能够提前发现并发操作导致线程安全风险，提出通过维护一个`modCount`记录修改的次数，迭代期间通过比对预期修改次数`expectedModCount`和`modCount`是否一致来判断是否存在并发操作，从而实现快速失败，由此保证在避免在异常时执行非必要的复杂代码。
+
+对应的我们给出下面这样一段在示例，我们首先插入`100`个操作元素，一个线程迭代元素，一个线程删除元素，最终输出结果如愿抛出`ConcurrentModificationException`：
+
+```java
+// 使用线程安全的 CopyOnWriteArrayList 避免 ConcurrentModificationException
+List<Integer> list = new CopyOnWriteArrayList<>();
+CountDownLatch countDownLatch = new CountDownLatch(2);
+
+// 添加元素
+for (int i = 0; i < 100; i++) {
+    list.add(i);
+}
+
+Thread t1 = new Thread(() -> {
+    // 迭代元素 (注意：Integer 是不可变的，这里的 i++ 不会修改 list 中的值)
+    for (Integer i : list) {
+        i++; // 这行代码实际上没有修改list中的元素
+    }
+    countDownLatch.countDown();
+});
+
+Thread t2 = new Thread(() -> {
+    System.out.println("删除元素1");
+    list.remove(Integer.valueOf(1)); // 使用 Integer.valueOf(1) 删除指定值的对象
+    countDownLatch.countDown();
+});
+
+t1.start();
+t2.start();
+countDownLatch.await();
+```
+
+在初始化时插入了`100`个元素，此时对应的修改`modCount`次数为`100`，随后线程 2 在线程 1 迭代期间进行元素删除操作，此时对应的`modCount`就变为`101`。
+ 线程 1 在随后`foreach`第 2 轮循环发现`modCount` 为`101`，与预期的`expectedModCount(值为100因为初始化插入了元素100个)`不等，判定为并发操作异常，于是便快速失败，抛出`ConcurrentModificationException`：
 
