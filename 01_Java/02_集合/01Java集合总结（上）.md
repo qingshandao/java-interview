@@ -318,3 +318,38 @@ countDownLatch.await();
 在初始化时插入了`100`个元素，此时对应的修改`modCount`次数为`100`，随后线程 2 在线程 1 迭代期间进行元素删除操作，此时对应的`modCount`就变为`101`。
  线程 1 在随后`foreach`第 2 轮循环发现`modCount` 为`101`，与预期的`expectedModCount(值为100因为初始化插入了元素100个)`不等，判定为并发操作异常，于是便快速失败，抛出`ConcurrentModificationException`：
 
+```java
+// 使用线程安全的 CopyOnWriteArrayList 避免 ConcurrentModificationException
+List<Integer> list = new ArrayList<>();
+CountDownLatch countDownLatch = new CountDownLatch(2);
+
+// 添加元素
+for (int i = 0; i < 100; i++) {
+    list.add(i);
+}
+
+Thread t1 = new Thread(() -> {
+    // 迭代元素 (注意：Integer 是不可变的，这里的 i++ 不会修改 list 中的值)
+    for (Integer i : list) {
+        try {
+            Thread.sleep(1); // 增加延迟，方便 t2 干扰
+            i++; // 这行代码实际上没有修改list中的元素
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+    }
+    countDownLatch.countDown();
+});
+
+Thread t2 = new Thread(() -> {
+    System.out.println("删除元素1");
+    list.remove(Integer.valueOf(1)); // 使用 Integer.valueOf(1) 删除指定值的对象
+    countDownLatch.countDown();
+});
+
+t1.start();
+t2.start();
+countDownLatch.await();
+```
+
