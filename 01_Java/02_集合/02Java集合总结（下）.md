@@ -61,6 +61,7 @@
  */
 static final int tableSizeFor(int cap) {
     int n = cap - 1;
+    // 之后每一步都是为了把最低的那个 1 扩散成全 1
     n |= n >>> 1;
     n |= n >>> 2;
     n |= n >>> 4;
@@ -80,4 +81,6 @@ static final int tableSizeFor(int cap) {
 | 存储内容     |               存储键值对               |                          仅存储对象                          |
 | 添加元素方法 |     调用 `put()`向 map 中添加元素      |             调用 `add()`方法向 `Set` 中添加元素              |
 | hash值计算   | `HashMap` 使用键（Key）计算 `hashcode` | `HashSet` 使用成员对象来计算 `hashcode` 值，对于两个对象来说 `hashcode` 可能相同，所以`equals()`方法用来判断对象的相等性 |
+
+## 3、HashMap 和 TreeMap 区别
 
