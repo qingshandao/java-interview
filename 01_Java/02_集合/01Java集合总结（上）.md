@@ -717,3 +717,608 @@ class Person {
 | 查询效率           | ✅ 高（O(1)）                       | ✅ 高（O(1)）                       | ❌ 较低（O(log n)）                     |
 | 适用场景           | 快速查重，无序集合                 | 需要记录元素插入顺序的去重集合     | 需要排序、范围查询、有序输出的集合     |
 
+# 四、Queue
+
+## 1、Queue 与 Deque 的区别
+
+### 1.1、Queue
+
+`Queue` 是单端队列，只能从一端插入元素，另一端删除元素，实现上一般遵循 **先进先出（FIFO）** 规则。
+
+`Queue` 扩展了 `Collection` 的接口，根据 **因为容量问题而导致操作失败后处理方式的不同** 可以分为两类方法: 一种在操作失败后会抛出异常，另一种则会返回特殊值。
+
+| `Queue` 接口 | 抛出异常  | 返回特殊值 |
+| ------------ | --------- | ---------- |
+| 插入队尾     | add(E e)  | offer(E e) |
+| 删除队首     | remove()  | poll()     |
+| 查询队首元素 | element() | peek()     |
+
+#### 1.1.1、`Queue` 抛出异常
+
+当队列满时插入元素，或队列空时移除/访问元素，会抛出异常。
+
+| 操作类型     | 方法名      | 异常类型                                 |
+| ------------ | ----------- | ---------------------------------------- |
+| 插入         | `add()`     | `IllegalStateException`（如果容量已满）  |
+| 移除         | `remove()`  | `NoSuchElementException`（如果队列为空） |
+| 检查头部元素 | `element()` | `NoSuchElementException`（如果队列为空） |
+
+```java
+import java.util.Queue;
+import java.util.LinkedList;
+
+public class ExceptionQueueExample {
+    public static void main(String[] args) {
+        Queue<Integer> queue = new LinkedList<>();
+
+        // 添加元素
+        queue.add(1);
+        queue.add(2);
+        queue.add(3);
+
+        // 移除元素
+        System.out.println(queue.remove()); // 输出 1
+
+        // 清空队列
+        queue.remove();
+        queue.remove();
+
+        // 尝试从空队列移除元素 -> 抛出 NoSuchElementException
+        System.out.println(queue.remove());  // ❌ 抛出异常
+    }
+}
+
+```
+
+#### 1.1.2、`Queue` 返回特殊值
+
+这些方法在失败时**不会抛出异常**，而是返回一个特殊值（如 `false` 或 `null`）
+
+| 操作类型     | 方法名    | 失败时返回值    | 成功时返回值         |
+| ------------ | --------- | --------------- | -------------------- |
+| 插入         | `offer()` | `false`（队满） | `true`               |
+| 移除         | `poll()`  | `null`（队空）  | 队头元素（移除元素） |
+| 检查头部元素 | `peek()`  | `null`（队空）  | 队头元素             |
+
+```java
+import java.util.Queue;
+import java.util.LinkedList;
+
+public class GracefulQueueExample {
+    public static void main(String[] args) {
+        Queue<Integer> queue = new LinkedList<>();
+
+        // offer 不会抛异常（LinkedList 无容量限制，永远返回 true）
+        System.out.println(queue.offer(1)); // true
+        System.out.println(queue.offer(2)); // true
+
+        // 清空队列
+        queue.poll();
+        queue.poll();
+
+        // 从空队列 poll 和 peek -> 返回 null
+        System.out.println(queue.poll());   // null ✅
+        System.out.println(queue.peek());   // null ✅
+    }
+}
+
+```
+
+#### 1.1.3、🆚 两种方法的适用场景
+
+| 场景                   | 推荐方法                                       |
+| ---------------------- | ---------------------------------------------- |
+| 需要精确控制错误和异常 | 使用抛异常的方法（如 `add()`、`remove()`）     |
+| 更偏向稳定、安全运行   | 使用返回特殊值的方法（如 `offer()`、`poll()`） |
+
+### 1.2、Deque
+
+`Deque` 是双端队列，在队列的两端均可以插入或删除元素，可以把它看作一个既可以作为队列使用（FIFO），也可以作为栈使用（LIFO）的容器。
+
+`Deque` 扩展了 `Queue` 的接口, 增加了在队首和队尾进行插入和删除的方法，同样根据失败后处理方式的不同分为两类：
+
+| `Deque` 接口 | 抛出异常      | 返回特殊值      |
+| ------------ | ------------- | --------------- |
+| 插入队首     | addFirst(E e) | offerFirst(E e) |
+| 插入队尾     | addLast(E e)  | offerLast(E e)  |
+| 删除队首     | removeFirst() | pollFirst()     |
+| 删除队尾     | removeLast()  | pollLast()      |
+| 查询队首元素 | getFirst()    | peekFirst()     |
+| 查询队尾元素 | getLast()     | peekLast()      |
+
+事实上，`Deque` 还提供有 `push()` 和 `pop()` 等其他方法，可用于模拟栈。
+
+#### 1.2.1、Deque 抛出异常
+
+| 操作     | 方法名          | 异常类型（失败情况）              |
+| -------- | --------------- | --------------------------------- |
+| 队首插入 | `addFirst(e)`   | `IllegalStateException`（容量满） |
+| 队尾插入 | `addLast(e)`    | `IllegalStateException`（容量满） |
+| 队首移除 | `removeFirst()` | `NoSuchElementException`（队空）  |
+| 队尾移除 | `removeLast()`  | `NoSuchElementException`（队空）  |
+| 查看队首 | `getFirst()`    | `NoSuchElementException`（队空）  |
+| 查看队尾 | `getLast()`     | `NoSuchElementException`（队空）  |
+
+```java
+import java.util.Deque;
+import java.util.ArrayDeque;
+
+public class DequeExceptionExample {
+    public static void main(String[] args) {
+        Deque<Integer> deque = new ArrayDeque<>(2);
+
+        deque.addFirst(1);  // ✅ 成功
+        deque.addLast(2);   // ✅ 成功
+        // deque.addLast(3); // ❌ 抛出 IllegalStateException（如果使用容量受限的 Deque）
+
+        System.out.println(deque.removeFirst()); // 输出 1
+        System.out.println(deque.removeLast());  // 输出 2
+
+        // 队列已空，再次移除会抛异常
+        System.out.println(deque.removeFirst()); // ❌ 抛出 NoSuchElementException
+    }
+}
+```
+
+#### 1.2.2、Deque 返回特殊值
+
+| 操作     | 方法名          | 成功时 | 失败时返回值  |
+| -------- | --------------- | ------ | ------------- |
+| 队首插入 | `offerFirst(e)` | `true` | `false`（满） |
+| 队尾插入 | `offerLast(e)`  | `true` | `false`（满） |
+| 队首移除 | `pollFirst()`   | 元素   | `null`（空）  |
+| 队尾移除 | `pollLast()`    | 元素   | `null`（空）  |
+| 查看队首 | `peekFirst()`   | 元素   | `null`（空）  |
+| 查看队尾 | `peekLast()`    | 元素   | `null`（空）  |
+
+```java
+import java.util.Deque;
+import java.util.ArrayDeque;
+
+public class DequeSafeExample {
+    public static void main(String[] args) {
+        Deque<Integer> deque = new ArrayDeque<>(2);
+
+        System.out.println(deque.offerFirst(10));  // true
+        System.out.println(deque.offerLast(20));   // true
+        System.out.println(deque.offerLast(30));   // false（队满）
+
+        System.out.println(deque.pollFirst());     // 10
+        System.out.println(deque.pollLast());      // 20
+        System.out.println(deque.pollLast());      // null（队空）
+
+        // peek 方法不移除元素
+        System.out.println(deque.peekFirst());     // null
+    }
+}
+```
+
+#### 1.2.3、🆚 总结
+
+| 功能     | 抛异常方法      | 返回特殊值方法  | 成功时返回 | 失败时返回     |
+| -------- | --------------- | --------------- | ---------- | -------------- |
+| 队首插入 | `addFirst(e)`   | `offerFirst(e)` | `true`     | 异常 / `false` |
+| 队尾插入 | `addLast(e)`    | `offerLast(e)`  | `true`     | 异常 / `false` |
+| 队首删除 | `removeFirst()` | `pollFirst()`   | 被移除元素 | 异常 / `null`  |
+| 队尾删除 | `removeLast()`  | `pollLast()`    | 被移除元素 | 异常 / `null`  |
+| 队首查看 | `getFirst()`    | `peekFirst()`   | 元素       | 异常 / `null`  |
+| 队尾查看 | `getLast()`     | `peekLast()`    | 元素       | 异常 / `null`  |
+
+#### 1.2.4、🔧 常见实现类
+
+- `ArrayDeque`（非线程安全，推荐使用）
+- `LinkedList`（也实现了 `Deque` 接口）
+- `ConcurrentLinkedDeque`（线程安全）
+
+## 2、ArrayDeque 与 LinkedList 的区别
+
+`ArrayDeque` 和 `LinkedList` 都实现了 `Deque` 接口，两者都具有队列的功能，但两者有什么区别呢？
+
+* `ArrayDeque` 是基于可变长的数组和双指针来实现，而 `LinkedList` 则通过链表来实现。
+* `ArrayDeque` 不支持存储 `NULL` 数据，但 `LinkedList` 支持。
+* `ArrayDeque` 是在 JDK1.6 才被引入的，而`LinkedList` 早在 JDK1.2 时就已经存在。
+* `ArrayDeque` 插入时可能存在扩容过程, 不过均摊后的插入操作依然为 O(1)。虽然 `LinkedList` 不需要扩容，但是每次插入数据时均需要申请新的堆空间，均摊性能相比更慢。
+
+从性能的角度上，选用 `ArrayDeque` 来实现队列要比 `LinkedList` 更好。此外，`ArrayDeque` 也可以用于实现栈。
+
+| 对比维度             | `ArrayDeque`                                       | `LinkedList`                            |
+| -------------------- | -------------------------------------------------- | --------------------------------------- |
+| 数据结构             | 动态数组 + 双指针                                  | 双向链表                                |
+| 实现接口             | `Deque`, `Queue`                                   | `Deque`, `Queue`, `List`                |
+| 引入版本             | JDK 1.6                                            | JDK 1.2                                 |
+| 是否支持 `null` 元素 | ❌ 不支持（`null` 作为空槽，插入 `null` 会抛异常）  | ✅ 支持                                  |
+| 插入/删除性能        | **均摊 O(1)**，但可能扩容                          | 每次插入/删除需新建节点，指针调整，略慢 |
+| 扩容机制             | 支持自动扩容（数组翻倍）                           | 无需扩容（链表动态增长）                |
+| 内存使用             | 较紧凑，数组连续内存                               | 较大（每个节点额外维护 prev/next 引用） |
+| 随机访问性能         | ❌ 不支持随机访问（无索引方法，底层是**循环数组**） | ✅ 支持（通过 List 接口提供 get(index)） |
+| 栈功能支持           | ✅ 高效支持栈操作（`push/pop/peek`）                | ✅ 也支持但性能略差                      |
+| 性能建议             | 性能更好，推荐用于队列或栈实现                     | 功能更通用，但性能略逊                  |
+| 线程安全             | ❌ 非线程安全（需外部同步）                         | ❌ 非线程安全（需外部同步）              |
+
+✅ 结论建议
+
+| 使用场景                        | 推荐选择     |
+| ------------------------------- | ------------ |
+| 实现高性能栈/队列               | `ArrayDeque` |
+| 需要频繁插入/删除和支持随机访问 | `LinkedList` |
+| 需要允许 `null` 元素            | `LinkedList` |
+| 对内存占用敏感                  | `ArrayDeque` |
+
+## 3、说一说 PriorityQueue
+
+`PriorityQueue` 是在 JDK1.5 中被引入的, 其与 `Queue` 的区别在于元素出队顺序是与优先级相关的，即总是优先级最高的元素先出队。
+
+这里列举其相关的一些要点：
+
+* `PriorityQueue` 利用了二叉堆的数据结构来实现的，底层使用可变长的数组来存储数据
+* `PriorityQueue` 通过堆元素的上浮和下沉，实现了在 O(logn) 的时间复杂度内插入元素和删除堆顶元素。
+* `PriorityQueue` 是非线程安全的，且不支持存储 `NULL` 和 `non-comparable` 的对象。
+* `PriorityQueue` 默认是小顶堆，但可以接收一个 `Comparator` 作为构造参数，从而来自定义元素优先级的先后。
+
+| 维度               | 说明                                                         |
+| ------------------ | ------------------------------------------------------------ |
+| 引入版本           | JDK 1.5                                                      |
+| 实现接口           | `Queue<E>`, `Collection<E>`, `Iterable<E>`                   |
+| 底层数据结构       | **二叉堆**（heap），数组实现（`Object[]`）                   |
+| 默认优先级         | **小顶堆**（最小元素优先出队）                               |
+| 插入/删除复杂度    | 插入元素 & 删除堆顶元素都是 **O(log n)**                     |
+| 查询堆顶复杂度     | `peek()` 为 O(1)，不移除元素                                 |
+| 是否线程安全       | ❌ 非线程安全，需通过 `PriorityBlockingQueue` 等实现保证线程安全 |
+| 是否允许 null      | ❌ 不允许插入 `null` 元素（会抛 `NullPointerException`）      |
+| 元素要求           | 元素必须实现 `Comparable` 接口，或提供自定义 `Comparator`    |
+| 是否支持随机访问   | ❌ 不支持，仅支持基于优先级的出队访问                         |
+| 可否自定义排序规则 | ✅ 支持，构造时传入 `Comparator` 来定义优先级                 |
+
+`PriorityQueue` 在面试中可能更多的会出现在手撕算法的时候，典型例题包括堆排序、求第 K 大的数、带权图的遍历等，所以需要会熟练使用才行。
+
+### 3.1、示例
+
+#### 示例 1：默认小顶堆（数字从小到大出队）
+
+```java
+import java.util.PriorityQueue;
+
+public class DefaultPriorityQueueDemo {
+    public static void main(String[] args) {
+        PriorityQueue<Integer> pq = new PriorityQueue<>();
+
+        pq.offer(30);
+        pq.offer(10);
+        pq.offer(20);
+
+        while (!pq.isEmpty()) {
+            System.out.println(pq.poll());  // 输出顺序：10, 20, 30
+        }
+    }
+}
+```
+
+| 情况                         | 排序依据                       | 示例                        |
+| ---------------------------- | ------------------------------ | --------------------------- |
+| 实现了 `Comparable` 接口     | 自然顺序（`compareTo()` 方法） | `String`、`Date`、`Integer` |
+| 提供了 `Comparator` 构造参数 | 自定义规则                     | `Comparator.comparing(...)` |
+| 都没有                       | ❌ 会抛 `ClassCastException`    | 自定义类没实现排序接口      |
+
+
+
+#### 示例 2：使用 Comparator 实现大顶堆（数字从大到小出队）
+
+```java
+import java.util.PriorityQueue;
+import java.util.Comparator;
+
+public class MaxHeapPriorityQueueDemo {
+    public static void main(String[] args) {
+        PriorityQueue<Integer> pq = new PriorityQueue<>(Comparator.reverseOrder());
+
+        pq.offer(30);
+        pq.offer(10);
+        pq.offer(20);
+
+        while (!pq.isEmpty()) {
+            System.out.println(pq.poll());  // 输出顺序：30, 20, 10
+        }
+    }
+}
+```
+
+
+
+#### 示例 3：自定义对象 + 自定义优先级
+
+```java
+import java.util.PriorityQueue;
+import java.util.Comparator;
+
+class Task {
+    String name;
+    int priority;
+
+    public Task(String name, int priority) {
+        this.name = name;
+        this.priority = priority;
+    }
+
+    public String toString() {
+        return name + " (priority: " + priority + ")";
+    }
+}
+
+public class CustomPriorityQueueDemo {
+    public static void main(String[] args) {
+        // 优先级越小越先出队（小顶堆）
+        PriorityQueue<Task> taskQueue = new PriorityQueue<>(Comparator.comparingInt(t -> t.priority));
+
+        taskQueue.offer(new Task("Task A", 3));
+        taskQueue.offer(new Task("Task B", 1));
+        taskQueue.offer(new Task("Task C", 2));
+
+        while (!taskQueue.isEmpty()) {
+            System.out.println(taskQueue.poll());
+        }
+        // 输出：
+        // Task B (priority: 1)
+        // Task C (priority: 2)
+        // Task A (priority: 3)
+    }
+}
+```
+
+
+
+#### 示例4：先按年龄升序，再按名字字典序降序
+
+```java
+import java.util.PriorityQueue;
+import java.util.Comparator;
+
+class Person {
+    String name;
+    int age;
+
+    public Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public String toString() {
+        return name + " (" + age + ")";
+    }
+}
+
+public class MultiFieldPriorityQueueDemo {
+    public static void main(String[] args) {
+        // Comparator：先按年龄升序，再按名字降序（字典序逆序）
+        Comparator<Person> personComparator = Comparator
+                .comparingInt((Person p) -> p.age)
+                .thenComparing((Person p) -> p.name, Comparator.reverseOrder());
+
+        PriorityQueue<Person> queue = new PriorityQueue<>(personComparator);
+
+        queue.offer(new Person("Charlie", 30));
+        queue.offer(new Person("Alice", 25));
+        queue.offer(new Person("Bob", 25));
+        queue.offer(new Person("David", 35));
+        queue.offer(new Person("Alice", 30));
+
+        while (!queue.isEmpty()) {
+            System.out.println(queue.poll());
+        }
+        
+        // 输出结果：
+        //  Bob (25)
+        //  Alice (25)
+        //  Charlie (30)
+        //  Alice (30)
+        //  David (35)
+
+    }
+}
+
+```
+
+## 4、什么是 BlockingQueue？
+
+`BlockingQueue` （阻塞队列）是一个接口，继承自 `Queue`。`BlockingQueue`阻塞的原因是其支持当队列没有元素时一直阻塞，直到有元素；还支持如果队列已满，一直等到队列可以放入新元素时再放入。
+
+```java
+public interface BlockingQueue<E> extends Queue<E> {
+  // ...
+}
+```
+
+`BlockingQueue` 常用于生产者-消费者模型中，生产者线程会向队列中添加数据，而消费者线程会从队列中取出数据进行处理。
+
+![](assets/blocking-queue.png)
+
+```java
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
+
+public class ProducerConsumerDemo {
+
+    public static void main(String[] args) {
+        // 创建一个容量为5的阻塞队列
+        BlockingQueue<Integer> queue = new ArrayBlockingQueue<>(5);
+
+        // 启动生产者线程
+        new Thread(new Producer(queue), "Producer").start();
+
+        // 启动消费者线程
+        new Thread(new Consumer(queue), "Consumer").start();
+    }
+}
+
+// 生产者类
+class Producer implements Runnable {
+    private BlockingQueue<Integer> queue;
+    private int count = 0;
+
+    public Producer(BlockingQueue<Integer> queue) {
+        this.queue = queue;
+    }
+
+    public void run() {
+        try {
+            while (true) {
+                Thread.sleep(500); // 模拟生产时间
+                int item = count++;
+                queue.put(item);  // 阻塞方法：如果队列满，会等待
+                System.out.println(Thread.currentThread().getName() + " produced: " + item);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+// 消费者类
+class Consumer implements Runnable {
+    private BlockingQueue<Integer> queue;
+
+    public Consumer(BlockingQueue<Integer> queue) {
+        this.queue = queue;
+    }
+
+    public void run() {
+        try {
+            while (true) {
+                Thread.sleep(800); // 模拟消费时间
+                int item = queue.take(); // 阻塞方法：如果队列空，会等待
+                System.out.println(Thread.currentThread().getName() + " consumed: " + item);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+```
+
+✅ 输出示例（节选）
+
+```
+Producer produced: 0
+Consumer consumed: 0
+Producer produced: 1
+Producer produced: 2
+Consumer consumed: 1
+Producer produced: 3
+Consumer consumed: 2
+```
+
+✅ 关键点说明
+
+| 方法         | 行为描述                         |
+| ------------ | -------------------------------- |
+| `put(E e)`   | 若队列满，阻塞直到有空间可插入   |
+| `take()`     | 若队列空，阻塞直到有元素可取出   |
+| `offer(E e)` | 若队列满，返回 `false`（非阻塞） |
+| `poll()`     | 若队列空，返回 `null`（非阻塞）  |
+
+✅ 可替换的 `BlockingQueue` 实现类
+
+| 类名                    | 特点说明                                                     |
+| ----------------------- | ------------------------------------------------------------ |
+| `ArrayBlockingQueue`    | 有界队列，数组实现，必须指定容量                             |
+| `LinkedBlockingQueue`   | 可选有界/无界，链表实现，默认最大容量是 `Integer.MAX_VALUE`（默认足够大，可视为无界） |
+| `PriorityBlockingQueue` | 支持优先级出队（非 FIFO），无界                              |
+| `DelayQueue`            | 元素延迟后才能取出                                           |
+| `SynchronousQueue`      | 不存储元素，每个 put 必须等待 take                           |
+
+## 5、BlockingQueue 的实现类有哪些？
+
+![](assets/blocking-queue-hierarchy.png)
+
+Java 中常用的阻塞队列实现类有以下几种：
+
+1. `ArrayBlockingQueue`：使用数组实现的有界阻塞队列。在创建时需要指定容量大小，并支持公平和非公平两种方式的锁访问机制。
+2. `LinkedBlockingQueue`：使用单向链表实现的可选有界阻塞队列。在创建时可以指定容量大小，如果不指定则默认为`Integer.MAX_VALUE`。和`ArrayBlockingQueue`不同的是， 它仅支持非公平的锁访问机制。
+3. `PriorityBlockingQueue`：支持优先级排序的无界阻塞队列。元素必须实现`Comparable`接口或者在构造函数中传入`Comparator`对象，并且不能插入 null 元素。
+4. `SynchronousQueue`：同步队列，是一种不存储元素的阻塞队列。每个插入操作都必须等待对应的删除操作，反之删除操作也必须等待插入操作。因此，`SynchronousQueue`通常用于线程之间的直接传递数据。
+5. `DelayQueue`：延迟队列，其中的元素只有到了其指定的延迟时间，才能够从队列中出队。
+6. ……
+
+日常开发中，这些队列使用的其实都不多，了解即可。
+
+## 6、ArrayBlockingQueue 和 LinkedBlockingQueue 有什么区别？
+
+`ArrayBlockingQueue` 和 `LinkedBlockingQueue` 是 Java 并发包中常用的两种阻塞队列实现，它们都是线程安全的。不过，不过它们之间也存在下面这些区别：
+
+* 底层实现：`ArrayBlockingQueue` 基于数组实现，而 `LinkedBlockingQueue` 基于链表实现。
+* 是否有界：`ArrayBlockingQueue` 是有界队列，必须在创建时指定容量大小。`LinkedBlockingQueue` 创建时可以不指定容量大小，默认是`Integer.MAX_VALUE`，也就是无界的。但也可以指定队列大小，从而成为有界的。
+* 锁是否分离： `ArrayBlockingQueue`中的锁是没有分离的，即生产和消费用的是同一个锁；`LinkedBlockingQueue`中的锁是分离的，即生产用的是`putLock`，消费是`takeLock`，这样可以防止生产者和消费者线程之间的锁争夺。
+* 内存占用：`ArrayBlockingQueue` 需要提前分配数组内存，而 `LinkedBlockingQueue` 则是动态分配链表节点内存。这意味着，`ArrayBlockingQueue` 在创建时就会占用一定的内存空间，且往往申请的内存比实际所用的内存更大，而`LinkedBlockingQueue` 则是根据元素的增加而逐渐占用内存空间。
+
+## 7、为什么链表实现的LinkedBlockingQueue 有上界
+
+✅ 1.**链表确实可以动态扩展，但不是无限制的**
+
+链表确实不像数组那样固定容量，它可以**动态添加节点**，从结构上讲没有固定边界。
+
+但是：
+
+> **Java 中的 `LinkedBlockingQueue` 是为了线程安全而设计的，并强制支持“容量限制”，这是出于控制并发行为和系统资源的考虑，而非结构限制。**
+
+✅  2.**容量上限是为了防止内存无限增长**
+
+即使链表可以不断扩展，如果不设限：
+
+* 生产者线程不断往队列中 `put()` 元素
+* 而消费者处理不过来
+* 元素会不断堆积，最终导致 **内存泄露** 或 **OOM（OutOfMemoryError）**
+
+因此：
+
+> `LinkedBlockingQueue` 强制要求设置一个容量限制（即使你不传，会默认用一个非常大的值），就是为了防止生产过快而系统崩溃。
+
+✅ 3. **并发条件下必须有界限来实现阻塞控制**
+
+`BlockingQueue` 的特点是：
+
+* `put()`：如果队列已满 → 阻塞
+* `take()`：如果队列为空 → 阻塞
+
+如果没有容量上限，`put()` 就永远不会阻塞。
+
+这就违背了 `BlockingQueue` 的初衷：
+
+> **让生产者/消费者通过阻塞协调速度，而不是无限推进。**
+
+✅ 4. **源码设计体现了“有界链表”的意图**
+
+来看 `LinkedBlockingQueue` 的源码结构（简化）：
+
+```java
+public class LinkedBlockingQueue<E> extends AbstractQueue<E>
+        implements BlockingQueue<E>, java.io.Serializable {
+
+    static class Node<E> {
+        E item;
+        Node<E> next;
+    }
+
+    /** 队列的容量 */
+    private final int capacity;
+
+    /** 当前元素数量 */
+    private final AtomicInteger count = new AtomicInteger();
+
+    ...
+}
+
+```
+
+- **`capacity`** 是一个 `final` 值 —— 表示队列最大容量
+- 默认构造函数传入的是 `Integer.MAX_VALUE`，就是为了让你能自己控制上限
+- 内部通过 `count` 来限制 `put()` 和 `take()` 是否阻塞
+
+✅ 总结：为什么链表结构还要有上界？
+
+| 原因分类         | 说明                                                         |
+| ---------------- | ------------------------------------------------------------ |
+| **不是结构限制** | 链表可以动态扩展，但并发队列关注的是资源使用和线程协调       |
+| **防止 OOM**     | 没有容量限制，生产过快会导致内存泄露或崩溃                   |
+| **控制阻塞行为** | `put()` 需要在满时阻塞，必须知道“满”的定义 —— 所以必须有 `capacity` 参数 |
+| **线程安全设计** | 用 `AtomicInteger` 精确统计数量，配合 `capacity` 限制并发访问 |
