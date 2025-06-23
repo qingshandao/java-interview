@@ -502,7 +502,89 @@ JDK1.7 及之前版本的 `HashMap` 在多线程环境下扩容操作可能存�
 
 一般面试中这样介绍就差不多，不需要记各种细节，个人觉得也没必要记。如果想要详细了解 `HashMap` 扩容导致死循环问题，可以看看耗子叔的这篇文章：[Java HashMap 的死循环](https://coolshell.cn/articles/9606.html)。
 
+## 8、HashMap 为什么线程不安全？
+
+JDK1.7 及之前版本，在多线程环境下，`HashMap` 扩容时会造成死循环和数据丢失的问题。
+
+数据丢失这个在 JDK1.7 和 JDK 1.8 中都存在，这里以 JDK 1.8 为例进行介绍。
+
+JDK 1.8 后，在 `HashMap` 中，多个键值对可能会被分配到同一个桶（bucket），并以链表或红黑树的形式存储。多个线程对 `HashMap` 的 `put` 操作会导致线程不安全，具体来说会有数据覆盖的风险。
+
+举个例子：
+
+* 两个线程 1,2 同时进行 put 操作，并且发生了哈希冲突（hash 函数计算出的插入下标是相同的）。
+* 不同的线程可能在不同的时间片获得 CPU 执行的机会，当前线程 1 执行完哈希冲突判断后，由于时间片耗尽挂起。线程 2 先完成了插入操作。
+* 随后，线程 1 获得时间片，由于之前已经进行过 hash 碰撞的判断，所有此时会直接进行插入，这就导致线程 2 插入的数据被线程 1 覆盖了。
+
+```java
+public V put(K key, V value) {
+    return putVal(hash(key), key, value, false, true);
+}
+
+final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
+                   boolean evict) {
+    // ...
+    // 判断是否出现 hash 碰撞
+    // (n - 1) & hash 确定元素存放在哪个桶中，桶为空，新生成结点放入桶中(此时，这个结点是放在数组中)
+    if ((p = tab[i = (n - 1) & hash]) == null)
+        tab[i] = newNode(hash, key, value, null);
+    // 桶中已经存在元素（处理hash冲突）
+    else {
+    // ...
+}
+```
+
+还有一种情况是这两个线程同时 `put` 操作导致 `size` 的值不正确，进而导致数据覆盖的问题：
+
+1. 线程 1 执行 `if(++size > threshold)` 判断时，假设获得 `size` 的值为 10，由于时间片耗尽挂起。
+2. 线程 2 也执行 `if(++size > threshold)` 判断，获得 `size` 的值也为 10，并将元素插入到该桶位中，并将 `size` 的值更新为 11。
+3. 随后，线程 1 获得时间片，它也将元素放入桶位中，并将 size 的值更新为 11。
+4. 线程 1、2 都执行了一次 `put` 操作，但是 `size` 的值只增加了 1，也就导致实际上只有一个元素被添加到了 `HashMap` 中。
+
+```java
+public V put(K key, V value) {
+    return putVal(hash(key), key, value, false, true);
+}
+
+final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
+                   boolean evict) {
+    // ...
+    // 实际大小大于阈值则扩容
+    if (++size > threshold)
+        resize();
+    // 插入后回调
+    afterNodeInsertion(evict);
+    return null;
+}
+```
 
 
 
+## 9、HashMap 常见的遍历方式?
+
+[HashMap 的 7 种遍历方式与性能分析！](./References/HashMap/HashMap 的 7 种遍历方式与性能分析！「修正篇」.html)
+
+**🐛 修正（参见：[issue#1411](https://github.com/Snailclimb/JavaGuide/issues/1411)）**：
+
+这篇文章对于 parallelStream 遍历方式的性能分析有误，先说结论：**存在阻塞时 parallelStream 性能最高, 非阻塞时 parallelStream 性能最低** 。
+
+当遍历不存在阻塞时, parallelStream 的性能是最低的：
+
+| Benchmark           | Mode | Cnt  | Score      | Error    | Units |
+| ------------------- | ---- | ---- | ---------- | -------- | ----- |
+| Test.entrySet       | avgt | 5    | 288.651 ±  | 10.536   | ns/op |
+| Test.keySet         | avgt | 5    | 584.594 ±  | 21.431   | ns/op |
+| Test.lambda         | avgt | 5    | 221.791 ±  | 10.198   | ns/op |
+| Test.parallelStream | avgt | 5    | 6919.163 ± | 1116.139 | ns/op |
+
+加入阻塞代码`Thread.sleep(10)`后, parallelStream 的性能才是最高的:
+
+| Benchmark           | Mode | Cnt  | Score            | Error        | Units |
+| ------------------- | ---- | ---- | ---------------- | ------------ | ----- |
+| Test.entrySet       | avgt | 5    | 1554828440.000 ± | 23657748.653 | ns/op |
+| Test.keySet         | avgt | 5    | 1550612500.000 ± | 6474562.858  | ns/op |
+| Test.lambda         | avgt | 5    | 1551065180.000 ± | 19164407.426 | ns/op |
+| Test.parallelStream | avgt | 5    | 186345456.667 ±  | 3210435.590  | ns/op |
+
+## 10、ConcurrentHashMap 和 Hashtable 的区别
 
