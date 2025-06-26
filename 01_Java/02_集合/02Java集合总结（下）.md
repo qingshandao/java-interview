@@ -598,7 +598,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
 	* 到了 JDK1.8 的时候，`ConcurrentHashMap` 已经摒弃了 `Segment` 的概念，而是直接用 `Node` 数组+链表+红黑树的数据结构来实现，并发控制使用 `synchronized` 和 CAS 来操作。（JDK1.6 以后 `synchronized` 锁做了很多优化） 整个看起来就像是优化过且线程安全的 `HashMap`，虽然在 JDK1.8 中还能看到 `Segment` 的数据结构，但是已经简化了属性，只是为了兼容旧版本；
 	* **`Hashtable`(同一把锁)** :使用 `synchronized` 来保证线程安全，效率非常低下。当一个线程访问同步方法时，其他线程也访问同步方法，可能会进入阻塞或轮询状态，如使用 put 添加元素，另一个线程不能使用 put 添加元素，也不能使用 get，竞争会越来越激烈效率越低。
 
-✅ 总结：为啥说 `Hashtable` 效率低？
+✅ 总结：为什么说 `Hashtable` 效率低？
 
 | 比较项           | `Hashtable`                         | `ConcurrentHashMap`                                 |
 | ---------------- | ----------------------------------- | --------------------------------------------------- |
