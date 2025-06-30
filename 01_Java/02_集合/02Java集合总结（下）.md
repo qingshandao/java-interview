@@ -649,21 +649,13 @@ static final class TreeBin<K,V> extends Node<K,V> {
 
 ### 11.1、JDK1.8 之前
 
-<<<<<<< HEAD
 ![](assets/java7_concurrenthashmap.png)
-=======
-![](./assets/java7_concurrenthashmap.png)
->>>>>>> 5ce5c01d3c237b4d6a0def4313d35f64b18d5f24
 
 首先将数据分为一段一段（这个“段”就是 `Segment`）的存储，然后给每一段数据配一把锁，当一个线程占用锁访问其中一个段数据时，其他段的数据也能被其他线程访问。
 
 **`ConcurrentHashMap` 是由 `Segment` 数组结构和 `HashEntry` 数组结构组成**。
 
-<<<<<<< HEAD
 `Segment` 继承了 `ReentrantLock`，所以 `Segment` 是一种可重入锁，扮演锁的角色。`HashEntry` 用于存储键值对数据。
-=======
-`Segment` 继承了 `ReentrantLock`,所以 `Segment` 是一种可重入锁，扮演锁的角色。`HashEntry` 用于存储键值对数据。
->>>>>>> 5ce5c01d3c237b4d6a0def4313d35f64b18d5f24
 
 ```java
 static class Segment<K,V> extends ReentrantLock implements Serializable {
@@ -676,11 +668,7 @@ static class Segment<K,V> extends ReentrantLock implements Serializable {
 
 ### 11.2、JDK1.8 之后
 
-<<<<<<< HEAD
 ![](assets/java8_concurrenthashmap.png)
-=======
-![](./assets/java8_concurrenthashmap.png)
->>>>>>> 5ce5c01d3c237b4d6a0def4313d35f64b18d5f24
 
 Java 8 几乎完全重写了 `ConcurrentHashMap`，代码量从原来 Java 7 中的 1000 多行，变成了现在的 6000 多行。
 
@@ -688,7 +676,6 @@ Java 8 几乎完全重写了 `ConcurrentHashMap`，代码量从原来 Java 7 中
 
 Java 8 中，锁粒度更细，`synchronized` 只锁定当前链表或红黑二叉树的首节点，这样只要 hash 不冲突，就不会产生并发，就不会影响其他 Node 的读写，效率大幅提升。
 
-<<<<<<< HEAD
 ## 12、JDK 1.7 和 JDK 1.8 的 ConcurrentHashMap 实现有什么不同？
 
 * **线程安全实现方式**：JDK 1.7 采用 `Segment` 分段锁来保证安全， `Segment` 是继承自 `ReentrantLock`。JDK1.8 放弃了 `Segment` 分段锁的设计，采用 `Node + CAS + synchronized` 保证线程安全，锁粒度更细，`synchronized` 只锁定当前链表或红黑二叉树的首节点。
@@ -872,5 +859,3 @@ synchronizedMap(Map<K,V> m) //返回由指定映射支持的同步（线程安�
 synchronizedSet(Set<T> s) //返回指定 set 支持的同步（线程安全的）set。
 ```
 
-=======
->>>>>>> 5ce5c01d3c237b4d6a0def4313d35f64b18d5f24
