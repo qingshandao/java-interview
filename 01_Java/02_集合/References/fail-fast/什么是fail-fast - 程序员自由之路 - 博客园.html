@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<!-- saved from url=(0053)https://www.cnblogs.com/54chensongxia/p/12470446.html -->
+<html lang="zh-cn" style="--olcb-folder-code-block-max-height: 80vh; --cnb-code-bg: rgb(245, 245, 245); --cnb-code-font-size: 12px; --cnb-code-color: rgb(68, 68, 68);" mode="light" theme="c"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="never">
+    <meta name="keywords" content="Java集合,fail-safe,fail-fast,01-Java基本功">
+    <meta name="description" content="fail-fast 在网上搜了下fail-fast的解释，很多人说fail-fast是Java中集合的一种错误检测机制，比如下面这个网友的解释： fail-fast 机制是java集合(Collection)中的一种错误机制。当多个线程对同一个集合的内容进行操作时，就可能会产生fail-fast事件">
+    <meta property="og:description" content="fail-fast 在网上搜了下fail-fast的解释，很多人说fail-fast是Java中集合的一种错误检测机制，比如下面这个网友的解释： fail-fast 机制是java集合(Collection)中的一种错误机制。当多个线程对同一个集合的内容进行操作时，就可能会产生fail-fast事件">
+    <meta http-equiv="Cache-Control" content="no-transform">
+    <meta http-equiv="Cache-Control" content="no-siteapp">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>什么是fail-fast - 程序员自由之路 - 博客园</title>
+    <link rel="icon" id="favicon" href="https://images.cnblogs.com/cnblogs_com/54chensongxia/1540920/t_avatar.png?t=1622447881429" type="image/x-icon">
+    <link rel="canonical" href="https://www.cnblogs.com/54chensongxia/p/12470446.html">
+    
+    <style>#home :not(.cnblogs_code):not(.cnblogs_Highlighter)>pre:not([highlighted]):not([class*="brush:"]) code:not(.hljs), :not(.cnblogs_code):not(.cnblogs_Highlighter)>pre:not([highlighted]):not([class*="brush:"]) code:not(.hljs) {background: rgb(245, 245, 245);
+        padding: 12px;
+        border: 0.8px solid rgb(204, 204, 204);
+        border-radius: 3px;
+        border-color: transparent;
+        color: rgb(68, 68, 68);
+        font-family: "Courier New", sans-serif;
+        font-size: 12px</style><link rel="stylesheet" href="./什么是fail-fast - 程序员自由之路 - 博客园_files/blog-common.min.css">
+    
+
+    
+        <link id="highlighter-theme-cnblogs" type="text/css" rel="stylesheet" href="./什么是fail-fast - 程序员自由之路 - 博客园_files/cnblogs.css">
+    <link type="text/css" rel="stylesheet" href="./什么是fail-fast - 程序员自由之路 - 博客园_files/custom.css">
+    
+    <link id="mobile-style" media="only screen and (max-width: 767px)" type="text/css" rel="stylesheet" href="./什么是fail-fast - 程序员自由之路 - 博客园_files/mobile-common.min.css">
+    
+    <link type="application/rss+xml" rel="alternate" href="https://www.cnblogs.com/54chensongxia/rss">
+    <link type="application/rsd+xml" rel="EditURI" href="https://www.cnblogs.com/54chensongxia/rsd.xml">
+    <link type="application/wlwmanifest+xml" rel="wlwmanifest" href="https://www.cnblogs.com/54chensongxia/wlwmanifest.xml">
+    
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      "@id": "https://www.cnblogs.com/54chensongxia/p/12470446.html",
+      "headline": "什么是fail-fast",
+      "description": "fail-fast 在网上搜了下fail-fast的解释，很多人说fail-fast是Java中集合的一种错误检测机制，比如下面这个网友的解释： fail-fast 机制是java集合(Collection)中的一种错误机制。当多个线程对同一个集合的内容进行操作时，就可能会产生fail-fast事件",
+      "image": [
+        
+      ],
+      "author": {
+        "@type": "Person",
+        "@id": "https://www.cnblogs.com/54chensongxia/",
+        "name": "程序员自由之路",
+        "url": "https://www.cnblogs.com/54chensongxia/"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "@id": "https://www.cnblogs.com/",
+        "name": "博客园",
+        "url": "https://www.cnblogs.com/"
+      },
+      "datePublished": "2020-05-29T15:08:00.0000000&#x2B;08:00",
+      "dateModified": "2020-06-24T13:49:00.0000000&#x2B;08:00",
+      "wordCount": "7076",
+      "isPartOf": {
+        "@type": "Blog",
+        "@id": "https://www.cnblogs.com/54chensongxia/",
+        "name": "程序员自由之路",
+        "publisher": {
+          "@type": "Organization",
+          "@id": "https://www.cnblogs.com/",
+          "name": "博客园"
+        }
+      }
+    }
+    </script>
+
+    <script>
+        var currentBlogId = 535435;
+        var currentBlogApp = '54chensongxia';
+        var isLogined = false;
+        var isBlogOwner = false;
+        var skinName = 'Custom';
+        var visitorUserId = '';
+        var hasCustomScript = true;
+        window.cb_enable_mathjax = true;
+        window.mathEngine = 0;
+        window.codeHighlightEngine = 1;
+        window.enableCodeLineNumber = false;
+        window.codeHighlightTheme = 'cnblogs';
+        window.darkModeCodeHighlightTheme = 'vs2015';
+        window.isDarkCodeHighlightTheme = false;
+        window.isDarkModeCodeHighlightThemeDark = true;
+        window.isDisableCodeHighlighter = false;
+        window.enableCodeThemeTypeFollowSystem = false;
+        window.enableMacStyleCodeBlock = false;
+    </script>
+        <script>
+            window.currentPostId = 12470446;
+            window.currentPostDateAdded = '2020-05-29 15:08';
+        </script>
+    <script src="./什么是fail-fast - 程序员自由之路 - 博客园_files/jquery-3.3.1.min.js.下载"></script>
+    <script src="./什么是fail-fast - 程序员自由之路 - 博客园_files/blog-common.min.js.下载"></script><style>.medium-zoom-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  opacity: 0;
+  transition: opacity 300ms;
+  will-change: opacity;
+}
+
+.medium-zoom--opened .medium-zoom-overlay {
+  cursor: pointer;
+  cursor: zoom-out;
+  opacity: 1;
+}
+
+.medium-zoom-image {
+  cursor: pointer;
+  cursor: zoom-in;
+  /*
+    The `transition` is marked as "!important" for the animation to happen
+    even though it's overriden by another inline `transition` style attribute.
+
+    This is problematic with frameworks that generate inline styles on their
+    images (e.g. Gatsby).
+
+    See https://github.com/francoischalifour/medium-zoom/issues/110
+   */
+  transition: transform 300ms cubic-bezier(0.2, 0, 0.2, 1) !important;
+}
+
+.medium-zoom-image--hidden {
+  visibility: hidden;
+}
+
+.medium-zoom-image--opened {
+  position: relative;
+  cursor: pointer;
+  cursor: zoom-out;
+  will-change: transform;
+}
+</style><script id="hljs-script" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/highlight.min.js.下载" type="text/javascript" async=""></script>
+        <script>updateCustomBlogReferrer();</script>
+    
+<script id="mathjax" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/MathJax.js.下载" type="text/javascript" async=""></script><meta property="og:image" content=""><link rel="stylesheet" href="./什么是fail-fast - 程序员自由之路 - 博客园_files/lightbox.min.css"><style type="text/css">.MathJax_Hover_Frame {border-radius: .25em; -webkit-border-radius: .25em; -moz-border-radius: .25em; -khtml-border-radius: .25em; box-shadow: 0px 0px 15px #83A; -webkit-box-shadow: 0px 0px 15px #83A; -moz-box-shadow: 0px 0px 15px #83A; -khtml-box-shadow: 0px 0px 15px #83A; border: 1px solid #A6D ! important; display: inline-block; position: absolute}
+.MathJax_Menu_Button .MathJax_Hover_Arrow {position: absolute; cursor: pointer; display: inline-block; border: 2px solid #AAA; border-radius: 4px; -webkit-border-radius: 4px; -moz-border-radius: 4px; -khtml-border-radius: 4px; font-family: 'Courier New',Courier; font-size: 9px; color: #F0F0F0}
+.MathJax_Menu_Button .MathJax_Hover_Arrow span {display: block; background-color: #AAA; border: 1px solid; border-radius: 3px; line-height: 0; padding: 4px}
+.MathJax_Hover_Arrow:hover {color: white!important; border: 2px solid #CCC!important}
+.MathJax_Hover_Arrow:hover span {background-color: #CCC!important}
+</style><style type="text/css">#MathJax_About {position: fixed; left: 50%; width: auto; text-align: center; border: 3px outset; padding: 1em 2em; background-color: #DDDDDD; color: black; cursor: default; font-family: message-box; font-size: 120%; font-style: normal; text-indent: 0; text-transform: none; line-height: normal; letter-spacing: normal; word-spacing: normal; word-wrap: normal; white-space: nowrap; float: none; z-index: 201; border-radius: 15px; -webkit-border-radius: 15px; -moz-border-radius: 15px; -khtml-border-radius: 15px; box-shadow: 0px 10px 20px #808080; -webkit-box-shadow: 0px 10px 20px #808080; -moz-box-shadow: 0px 10px 20px #808080; -khtml-box-shadow: 0px 10px 20px #808080; filter: progid:DXImageTransform.Microsoft.dropshadow(OffX=2, OffY=2, Color='gray', Positive='true')}
+#MathJax_About.MathJax_MousePost {outline: none}
+.MathJax_Menu {position: absolute; background-color: white; color: black; width: auto; padding: 2px; border: 1px solid #CCCCCC; margin: 0; cursor: default; font: menu; text-align: left; text-indent: 0; text-transform: none; line-height: normal; letter-spacing: normal; word-spacing: normal; word-wrap: normal; white-space: nowrap; float: none; z-index: 201; box-shadow: 0px 10px 20px #808080; -webkit-box-shadow: 0px 10px 20px #808080; -moz-box-shadow: 0px 10px 20px #808080; -khtml-box-shadow: 0px 10px 20px #808080; filter: progid:DXImageTransform.Microsoft.dropshadow(OffX=2, OffY=2, Color='gray', Positive='true')}
+.MathJax_MenuItem {padding: 2px 2em; background: transparent}
+.MathJax_MenuArrow {position: absolute; right: .5em; padding-top: .25em; color: #666666; font-size: .75em}
+.MathJax_MenuActive .MathJax_MenuArrow {color: white}
+.MathJax_MenuArrow.RTL {left: .5em; right: auto}
+.MathJax_MenuCheck {position: absolute; left: .7em}
+.MathJax_MenuCheck.RTL {right: .7em; left: auto}
+.MathJax_MenuRadioCheck {position: absolute; left: 1em}
+.MathJax_MenuRadioCheck.RTL {right: 1em; left: auto}
+.MathJax_MenuLabel {padding: 2px 2em 4px 1.33em; font-style: italic}
+.MathJax_MenuRule {border-top: 1px solid #CCCCCC; margin: 4px 1px 0px}
+.MathJax_MenuDisabled {color: GrayText}
+.MathJax_MenuActive {background-color: Highlight; color: HighlightText}
+.MathJax_MenuDisabled:focus, .MathJax_MenuLabel:focus {background-color: #E8E8E8}
+.MathJax_ContextMenu:focus {outline: none}
+.MathJax_ContextMenu .MathJax_MenuItem:focus {outline: none}
+#MathJax_AboutClose {top: .2em; right: .2em}
+.MathJax_Menu .MathJax_MenuClose {top: -10px; left: -10px}
+.MathJax_MenuClose {position: absolute; cursor: pointer; display: inline-block; border: 2px solid #AAA; border-radius: 18px; -webkit-border-radius: 18px; -moz-border-radius: 18px; -khtml-border-radius: 18px; font-family: 'Courier New',Courier; font-size: 24px; color: #F0F0F0}
+.MathJax_MenuClose span {display: block; background-color: #AAA; border: 1.5px solid; border-radius: 18px; -webkit-border-radius: 18px; -moz-border-radius: 18px; -khtml-border-radius: 18px; line-height: 0; padding: 8px 0 6px}
+.MathJax_MenuClose:hover {color: white!important; border: 2px solid #CCC!important}
+.MathJax_MenuClose:hover span {background-color: #CCC!important}
+.MathJax_MenuClose:hover:focus {outline: none}
+</style><style type="text/css">.MathJax_Preview .MJXf-math {color: inherit!important}
+</style><style type="text/css">.MJX_Assistive_MathML {position: absolute!important; top: 0; left: 0; clip: rect(1px, 1px, 1px, 1px); padding: 1px 0 0 0!important; border: 0!important; height: 1px!important; width: 1px!important; overflow: hidden!important; display: block!important; -webkit-touch-callout: none; -webkit-user-select: none; -khtml-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none}
+.MJX_Assistive_MathML.MJX_Assistive_MathML_Block {width: 100%!important}
+</style><style type="text/css">#MathJax_Zoom {position: absolute; background-color: #F0F0F0; overflow: auto; display: block; z-index: 301; padding: .5em; border: 1px solid black; margin: 0; font-weight: normal; font-style: normal; text-align: left; text-indent: 0; text-transform: none; line-height: normal; letter-spacing: normal; word-spacing: normal; word-wrap: normal; white-space: nowrap; float: none; -webkit-box-sizing: content-box; -moz-box-sizing: content-box; box-sizing: content-box; box-shadow: 5px 5px 15px #AAAAAA; -webkit-box-shadow: 5px 5px 15px #AAAAAA; -moz-box-shadow: 5px 5px 15px #AAAAAA; -khtml-box-shadow: 5px 5px 15px #AAAAAA; filter: progid:DXImageTransform.Microsoft.dropshadow(OffX=2, OffY=2, Color='gray', Positive='true')}
+#MathJax_ZoomOverlay {position: absolute; left: 0; top: 0; z-index: 300; display: inline-block; width: 100%; height: 100%; border: 0; padding: 0; margin: 0; background-color: white; opacity: 0; filter: alpha(opacity=0)}
+#MathJax_ZoomFrame {position: relative; display: inline-block; height: 0; width: 0}
+#MathJax_ZoomEventTrap {position: absolute; left: 0; top: 0; z-index: 302; display: inline-block; border: 0; padding: 0; margin: 0; background-color: white; opacity: 0; filter: alpha(opacity=0)}
+</style><style type="text/css">.MathJax_Preview {color: #888}
+#MathJax_Message {position: fixed; left: 1em; bottom: 1.5em; background-color: #E6E6E6; border: 1px solid #959595; margin: 0px; padding: 2px 8px; z-index: 102; color: black; font-size: 80%; width: auto; white-space: nowrap}
+#MathJax_MSIE_Frame {position: absolute; top: 0; left: 0; width: 0px; z-index: 101; border: 0px; margin: 0px; padding: 0px}
+.MathJax_Error {color: #CC0000; font-style: italic}
+</style><style type="text/css">.MJXp-script {font-size: .8em}
+.MJXp-right {-webkit-transform-origin: right; -moz-transform-origin: right; -ms-transform-origin: right; -o-transform-origin: right; transform-origin: right}
+.MJXp-bold {font-weight: bold}
+.MJXp-italic {font-style: italic}
+.MJXp-scr {font-family: MathJax_Script,'Times New Roman',Times,STIXGeneral,serif}
+.MJXp-frak {font-family: MathJax_Fraktur,'Times New Roman',Times,STIXGeneral,serif}
+.MJXp-sf {font-family: MathJax_SansSerif,'Times New Roman',Times,STIXGeneral,serif}
+.MJXp-cal {font-family: MathJax_Caligraphic,'Times New Roman',Times,STIXGeneral,serif}
+.MJXp-mono {font-family: MathJax_Typewriter,'Times New Roman',Times,STIXGeneral,serif}
+.MJXp-largeop {font-size: 150%}
+.MJXp-largeop.MJXp-int {vertical-align: -.2em}
+.MJXp-math {display: inline-block; line-height: 1.2; text-indent: 0; font-family: 'Times New Roman',Times,STIXGeneral,serif; white-space: nowrap; border-collapse: collapse}
+.MJXp-display {display: block; text-align: center; margin: 1em 0}
+.MJXp-math span {display: inline-block}
+.MJXp-box {display: block!important; text-align: center}
+.MJXp-box:after {content: " "}
+.MJXp-rule {display: block!important; margin-top: .1em}
+.MJXp-char {display: block!important}
+.MJXp-mo {margin: 0 .15em}
+.MJXp-mfrac {margin: 0 .125em; vertical-align: .25em}
+.MJXp-denom {display: inline-table!important; width: 100%}
+.MJXp-denom > * {display: table-row!important}
+.MJXp-surd {vertical-align: top}
+.MJXp-surd > * {display: block!important}
+.MJXp-script-box > *  {display: table!important; height: 50%}
+.MJXp-script-box > * > * {display: table-cell!important; vertical-align: top}
+.MJXp-script-box > *:last-child > * {vertical-align: bottom}
+.MJXp-script-box > * > * > * {display: block!important}
+.MJXp-mphantom {visibility: hidden}
+.MJXp-munderover, .MJXp-munder {display: inline-table!important}
+.MJXp-over {display: inline-block!important; text-align: center}
+.MJXp-over > * {display: block!important}
+.MJXp-munderover > *, .MJXp-munder > * {display: table-row!important}
+.MJXp-mtable {vertical-align: .25em; margin: 0 .125em}
+.MJXp-mtable > * {display: inline-table!important; vertical-align: middle}
+.MJXp-mtr {display: table-row!important}
+.MJXp-mtd {display: table-cell!important; text-align: center; padding: .5em 0 0 .5em}
+.MJXp-mtr > .MJXp-mtd:first-child {padding-left: 0}
+.MJXp-mtr:first-child > .MJXp-mtd {padding-top: 0}
+.MJXp-mlabeledtr {display: table-row!important}
+.MJXp-mlabeledtr > .MJXp-mtd:first-child {padding-left: 0}
+.MJXp-mlabeledtr:first-child > .MJXp-mtd {padding-top: 0}
+.MJXp-merror {background-color: #FFFF88; color: #CC0000; border: 1px solid #CC0000; padding: 1px 3px; font-style: normal; font-size: 90%}
+.MJXp-scale0 {-webkit-transform: scaleX(.0); -moz-transform: scaleX(.0); -ms-transform: scaleX(.0); -o-transform: scaleX(.0); transform: scaleX(.0)}
+.MJXp-scale1 {-webkit-transform: scaleX(.1); -moz-transform: scaleX(.1); -ms-transform: scaleX(.1); -o-transform: scaleX(.1); transform: scaleX(.1)}
+.MJXp-scale2 {-webkit-transform: scaleX(.2); -moz-transform: scaleX(.2); -ms-transform: scaleX(.2); -o-transform: scaleX(.2); transform: scaleX(.2)}
+.MJXp-scale3 {-webkit-transform: scaleX(.3); -moz-transform: scaleX(.3); -ms-transform: scaleX(.3); -o-transform: scaleX(.3); transform: scaleX(.3)}
+.MJXp-scale4 {-webkit-transform: scaleX(.4); -moz-transform: scaleX(.4); -ms-transform: scaleX(.4); -o-transform: scaleX(.4); transform: scaleX(.4)}
+.MJXp-scale5 {-webkit-transform: scaleX(.5); -moz-transform: scaleX(.5); -ms-transform: scaleX(.5); -o-transform: scaleX(.5); transform: scaleX(.5)}
+.MJXp-scale6 {-webkit-transform: scaleX(.6); -moz-transform: scaleX(.6); -ms-transform: scaleX(.6); -o-transform: scaleX(.6); transform: scaleX(.6)}
+.MJXp-scale7 {-webkit-transform: scaleX(.7); -moz-transform: scaleX(.7); -ms-transform: scaleX(.7); -o-transform: scaleX(.7); transform: scaleX(.7)}
+.MJXp-scale8 {-webkit-transform: scaleX(.8); -moz-transform: scaleX(.8); -ms-transform: scaleX(.8); -o-transform: scaleX(.8); transform: scaleX(.8)}
+.MJXp-scale9 {-webkit-transform: scaleX(.9); -moz-transform: scaleX(.9); -ms-transform: scaleX(.9); -o-transform: scaleX(.9); transform: scaleX(.9)}
+.MathJax_PHTML .noError {vertical-align: ; font-size: 90%; text-align: left; color: black; padding: 1px 3px; border: 1px solid}
+</style></head>
+<body class="skin-custom no-navbar mathjax2 hljs-engine"><div id="MathJax_Message" style="display: none;"></div>
+    <a name="top"></a>
+    <div id="top_nav" class="navbar forpc navbar-custom">
+        <nav id="nav_main" class="navbar-main">
+            <ul id="nav_left" class="navbar-list navbar-left">
+                <li class="navbar-branding">                    
+                    <a href="https://www.cnblogs.com/" title="开发者的网上家园" role="banner">
+                        <img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/logo.svg" alt="博客园logo">
+                    </a>
+                </li>               
+                <li><a href="https://cnblogs.vip/">会员</a></li>
+                <li><a href="https://cnblogs.vip/store">周边</a></li>
+                <li><a href="https://www.cnblogs.com/cmt/p/18500368">众包</a></li>
+                <li><a href="https://news.cnblogs.com/" onclick="countClicks(&#39;nav&#39;, &#39;skin-navbar-news&#39;)">新闻</a></li>
+                <li><a href="https://q.cnblogs.com/" onclick="countClicks(&#39;nav&#39;, &#39;skin-navbar-q&#39;)">博问</a></li>
+                <li><a href="https://ing.cnblogs.com/" onclick="countClicks(&#39;nav&#39;, &#39;skin-navbar-ing&#39;)">闪存</a></li>
+                <li><a href="https://www.cnblogs.com/cmt/p/18341478">赞助商</a></li>
+                <li><a href="https://chat2db-ai.com/" target="_blank" onclick="countClicks(&#39;nav&#39;, &#39;skin-navbar-chat2db&#39;)">Chat2DB</a></li>
+            </ul>
+            <ul id="nav_right" class="navbar-list navbar-right">
+                <li>
+                    <form id="zzk_search" class="navbar-search dropdown" action="https://zzk.cnblogs.com/s" method="get" role="search">
+                        <input name="w" id="zzk_search_input" placeholder="代码改变世界" type="search" tabindex="3" autocomplete="off">
+                        <button id="zzk_search_button" onclick="window.navbarSearchManager.triggerActiveOption()">
+                            <img id="search_icon" class="focus-hidden" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/search.svg" alt="搜索">
+                            <img class="hidden focus-visible" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/enter.svg" alt="搜索">
+                        </button>
+                        <ul id="navbar_search_options" class="dropdown-menu quick-search-menu">
+                            <li tabindex="0" class="active" onclick="zzkSearch(event, document.getElementById(&#39;zzk_search_input&#39;).value)">
+                                <div class="keyword-wrapper">
+                                    <img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/search.svg" alt="搜索">
+                                    <div class="keyword"></div>
+                                </div>
+                                <span class="search-area">所有博客</span>
+                            </li>
+                                    <li tabindex="1" onclick="zzkBlogSearch(event, &#39;54chensongxia&#39;, document.getElementById(&#39;zzk_search_input&#39;).value)">
+                                        <div class="keyword-wrapper">
+                                            <img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/search.svg" alt="搜索">
+                                            <div class="keyword"></div>
+                                        </div>
+                                        <span class="search-area">当前博客</span>
+                                    </li>
+                        </ul>
+                    </form>
+                </li>
+                <li id="navbar_login_status" class="navbar-list">
+                    <a class="navbar-user-info navbar-blog" href="https://i.cnblogs.com/EditPosts.aspx?opt=1" alt="写随笔" title="写随笔" style="display: none;">
+                        <img id="new_post_icon" class="navbar-icon" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/newpost.svg" alt="写随笔">
+                    </a>
+                    <a id="navblog-myblog-icon" class="navbar-user-info navbar-blog" href="https://passport.cnblogs.com/GetBlogApplyStatus.aspx" alt="我的博客" title="我的博客" style="display: none;">
+                        <img id="myblog_icon" class="navbar-icon" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/myblog.svg" alt="我的博客">
+                    </a>
+                    <a class="navbar-user-info navbar-message navbar-icon-wrapper" href="https://msg.cnblogs.com/" alt="短消息" title="短消息" style="display: none;">
+                        <img id="msg_icon" class="navbar-icon" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/message.svg" alt="短消息">
+                        <span id="msg_count" style="display: none"></span>
+                    </a>
+                    <a id="navbar_lite_mode_indicator" data-current-page="blog" style="display: none" href="javascript:void(0)" alt="简洁模式" title="简洁模式启用，您在访问他人博客时会使用简洁款皮肤展示">
+                        <img class="navbar-icon" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/lite-mode-on.svg" alt="简洁模式">
+                    </a>
+                    <div id="user_info" class="navbar-user-info dropdown" style="display: none;">
+                        <a class="dropdown-button" href="https://home.cnblogs.com/">
+                            <img id="user_icon" class="navbar-avatar" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/avatar-default.svg" alt="用户头像">
+                        </a>
+                        <div class="dropdown-menu">
+                            <a id="navblog-myblog-text" href="https://passport.cnblogs.com/GetBlogApplyStatus.aspx">我的博客</a>
+                            <a href="https://home.cnblogs.com/">我的园子</a>
+                            <a href="https://account.cnblogs.com/settings/account">账号设置</a>
+                            <a href="https://vip.cnblogs.com/my">会员中心</a>
+                            <a href="javascript:void(0)" id="navbar_lite_mode_toggle" title="简洁模式会使用简洁款皮肤显示所有博客">
+    简洁模式 <span id="navbar_lite_mode_spinner" class="hide">...</span>
+</a>
+
+                            <a href="javascript:void(0)" onclick="account.logout();">退出登录</a>
+                        </div>
+                    </div>
+                    <a class="navbar-anonymous" href="https://account.cnblogs.com/signup" style="display: inline;">注册</a>
+                    <a class="navbar-anonymous" href="javascript:void(0);" onclick="account.login()" style="display: inline;">登录</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+
+    <div id="page_begin_html">
+        <div class="light-loading" style="display: none;">
+  <div class="box">
+    <h2>Loading</h2>
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+</div>
+    </div>
+
+    <div id="home">
+<div id="header"><div class="esa-mobile-menu"><i class="fa fa-bars"></i></div>
+	<div id="blogTitle">
+        <a id="lnkBlogLogo" href="https://www.cnblogs.com/54chensongxia/"><img id="blogLogo" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/logo.gif" alt="返回主页"></a>		
+		
+
+<h1><a id="Header1_HeaderTitle" class="headermaintitle HeaderMainTitle" href="https://www.cnblogs.com/54chensongxia">程序员自由之路</a>
+</h1>
+<h2></h2>
+
+
+
+
+		
+	</div>
+	<div id="navigator">
+		
+<ul id="navList">
+<li><a id="blog_nav_sitehome" class="menu" href="https://www.cnblogs.com/">
+博客园</a>
+</li>
+<li>
+<a id="blog_nav_myhome" class="menu" href="https://www.cnblogs.com/54chensongxia/">
+首页</a>
+</li><li><a class="menu" target="_self" href="https://www.cnblogs.com/54chensongxia/tag/">标签</a></li><li><a class="menu" target="_self" href="https://www.cnblogs.com/54chensongxia/p/">归档</a></li>
+
+<li>
+<a id="blog_nav_contact" class="menu" href="https://msg.cnblogs.com/send/%E7%A8%8B%E5%BA%8F%E5%91%98%E8%87%AA%E7%94%B1%E4%B9%8B%E8%B7%AF">
+联系</a></li>
+<li>
+<a id="blog_nav_rss" class="menu" href="javascript:void(0)" data-rss="https://www.cnblogs.com/54chensongxia/rss/">
+订阅</a>
+<!--<partial name="./Shared/_XmlLink.cshtml" model="Model" /></li>--></li>
+<li>
+<a id="blog_nav_admin" class="menu" href="https://i.cnblogs.com/">
+管理</a>
+</li>
+</ul>
+
+
+		<div class="blogStats">
+			<span id="stats_post_count">随笔 - 300&nbsp; </span>
+<span id="stats_article_count">文章 - 0&nbsp; </span>
+<span id="stats-comment_count">评论 - 178&nbsp; </span>
+<span id="stats-total-view-count">阅读 - 
+<span title="总阅读数: 1439252">
+143万</span></span>
+
+		</div>
+	</div>
+</div>
+<div id="main">
+	<div id="mainContent">
+	<div class="forFlow">
+		<div id="post_detail">
+    
+    <div id="topics">
+        <div class="post">
+            <h1 class="postTitle">
+                <a id="cb_post_title_url" class="postTitle2 vertical-middle" href="https://www.cnblogs.com/54chensongxia/p/12470446.html" title="发布于 2020-05-29 15:08">
+    <span role="heading" aria-level="2">什么是fail-fast</span>
+    
+
+</a><button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button>
+
+            </h1>
+            <div class="clear"></div>
+            <div class="postBody">
+                <div id="cnblogs_post_body" class="blogpost-body cnblogs-markdown">
+<h2 id="fail-fast">fail-fast<button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#fail-fast" class="esa-anchor" style="opacity: 0;">#</a></h2>
+<p>在网上搜了下fail-fast的解释，很多人说fail-fast是Java中集合的一种错误检测机制，比如下面这个网友的解释：</p>
+<blockquote>
+<p>fail-fast 机制是java集合(Collection)中的一种错误机制。当多个线程对同一个集合的内容进行操作时，就可能会产生fail-fast事件。</p>
+</blockquote>
+<p>其实fail-fast机制并不是Java集合特有的机制，它是一个通用的系统设计思想。看下维基百科的解释</p>
+<blockquote>
+<p>In systems design, a fail-fast system is one which immediately reports at its interface any condition that is likely to indicate a failure. Fail-fast systems are usually designed to stop normal operation rather than attempt to continue a possibly flawed process. Such designs often check the system’s state at several points in an operation, so any failures can be detected early. The responsibility of a fail-fast module is detecting errors, then letting the next-highest level of the system handle them.</p>
+</blockquote>
+<p>从上面的解释中可以了解到：fail-fast是一种错误检测机制，一旦检测到可能发生错误，就立马抛出异常，程序不继续往下执行。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="language-java highlighter-hljs hljs hljsln ln-hide">
+<span class="hljs-keyword">public</span> UserDomain <span class="hljs-title function_">queryUserById</span><span class="hljs-params">(String userId)</span>{
+    <span class="hljs-keyword">if</span>(userId==<span class="hljs-literal">null</span>||<span class="hljs-string">""</span>.equals(userId)){
+        <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">RuntimeException</span>(<span class="hljs-string">"error params..."</span>);
+    }
+    <span class="hljs-comment">//do something</span>
+}
+
+</code></pre>
+<p>上面的列子就是一个快速失败的列子，而且是我们开发中经常会用到的错误检测的方式。这样做能及早发现问题，不让明显错误的代码继续往下运行，而且自己抛出的异常更更容易定位问题。</p>
+<h2 id="集合中的fail-fast机制">集合中的fail-fast机制<button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E9%9B%86%E5%90%88%E4%B8%AD%E7%9A%84fail-fast%E6%9C%BA%E5%88%B6" class="esa-anchor" style="opacity: 0;">#</a></h2>
+<p><a href="https://www.cnblogs.com/54chensongxia/p/undefined" data-title="" data-alt="" data-lightbox="roadtrip"><img alt="" loading="lazy"></a></p>
+<p>下面来复现下异常</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="language-java highlighter-hljs hljs hljsln ln-hide">List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> <span class="hljs-title class_">ArrayList</span>&lt;String&gt;() {{
+    add(<span class="hljs-string">"Hollis"</span>);
+    add(<span class="hljs-string">"hollis"</span>);
+    add(<span class="hljs-string">"HollisChuang"</span>);
+    add(<span class="hljs-string">"H"</span>);
+}};
+
+<span class="hljs-keyword">for</span> (String userName : userNames) {
+    <span class="hljs-keyword">if</span> (userName.equals(<span class="hljs-string">"Hollis"</span>)) {
+        userNames.remove(userName);
+    }
+}
+
+System.out.println(userNames);
+</code></pre>
+<p>以上代码，使用增强for循环遍历元素，并尝试删除其中的Hollis字符串元素。运行以上代码，会抛出以下异常：</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-mipsasm hljsln ln-hide">Exception in thread <span class="hljs-string">"main"</span> <span class="hljs-keyword">java.util.ConcurrentModificationException
+</span><span class="hljs-built_in">at</span> <span class="hljs-keyword">java.util.ArrayList$Itr.checkForComodification(ArrayList.java:909)
+</span><span class="hljs-built_in">at</span> <span class="hljs-keyword">java.util.ArrayList$Itr.next(ArrayList.java:859)
+</span><span class="hljs-built_in">at</span> com.hollis.ForEach.main(ForEach.<span class="hljs-keyword">java:22)
+</span></code></pre>
+<p>同样的，读者可以尝试下在增强for循环中使用add方法添加元素，结果也会同样抛出该异常。</p>
+<p><strong>异常产生的原因</strong></p>
+<p>增强for循环其实是Java提供的一个语法糖，我们将代码反编译后可以看到增强for循环其实是用的是<code>Iterator</code>迭代器。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="language-java highlighter-hljs hljs hljsln ln-hide"><span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> {
+    <span class="hljs-comment">// 使用ImmutableList初始化一个List</span>
+    List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> <span class="hljs-title class_">ArrayList</span>&lt;String&gt;() {{
+        add(<span class="hljs-string">"Hollis"</span>);
+        add(<span class="hljs-string">"hollis"</span>);
+        add(<span class="hljs-string">"HollisChuang"</span>);
+        add(<span class="hljs-string">"H"</span>);
+    }};
+
+    <span class="hljs-type">Iterator</span> <span class="hljs-variable">iterator</span> <span class="hljs-operator">=</span> userNames.iterator();
+    <span class="hljs-keyword">do</span>
+    {
+        <span class="hljs-keyword">if</span>(!iterator.hasNext())
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-type">String</span> <span class="hljs-variable">userName</span> <span class="hljs-operator">=</span> (String)iterator.next();
+        <span class="hljs-keyword">if</span>(userName.equals(<span class="hljs-string">"Hollis"</span>))
+            userNames.remove(userName);
+    } <span class="hljs-keyword">while</span>(<span class="hljs-literal">true</span>);
+    System.out.println(userNames);
+}
+</code></pre>
+<p>通过以上代码的异常堆栈，我们可以跟踪到真正抛出异常的代码是：</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-scss hljsln ln-hide">java<span class="hljs-selector-class">.util</span><span class="hljs-selector-class">.ArrayList</span><span class="hljs-variable">$Itr</span><span class="hljs-selector-class">.checkForComodification</span>(ArrayList.java:<span class="hljs-number">909</span>)
+</code></pre>
+<p>该方法是在iterator.next()方法中调用的。我们看下该方法的实现：</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-cpp hljsln ln-hide"><span class="hljs-function"><span class="hljs-keyword">final</span> <span class="hljs-type">void</span> <span class="hljs-title">checkForComodification</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">if</span> (modCount != expectedModCount)
+        <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-built_in">ConcurrentModificationException</span>();
+}
+</code></pre>
+<p>如上，在该方法中对modCount和expectedModCount进行了比较，如果二者不想等，则抛出CMException。</p>
+<p>那么，modCount和expectedModCount是什么？是什么原因导致他们的值不想等的呢？</p>
+<p>modCount是ArrayList中的一个成员变量。它表示该集合实际被修改的次数。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide">List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;() {{
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"Hollis"</span>);
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"hollis"</span>);
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"HollisChuang"</span>);
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"H"</span>);
+}};
+</code></pre>
+<p>当使用以上代码初始化集合之后该变量就有了。初始值为0。</p>
+<p>expectedModCount 是 ArrayList中的一个内部类——Itr中的成员变量。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-vbnet hljsln ln-hide"><span class="hljs-keyword">Iterator</span> <span class="hljs-keyword">iterator</span> = userNames.<span class="hljs-keyword">iterator</span>();
+</code></pre>
+<p>以上代码，即可得到一个 Itr类，该类实现了Iterator接口。</p>
+<p>expectedModCount表示这个迭代器预期该集合被修改的次数。其值随着Itr被创建而初始化。只有通过迭代器对集合进行操作，该值才会改变。</p>
+<p>那么，接着我们看下userNames.remove(userName);方法里面做了什么事情，为什么会导致expectedModCount和modCount的值不一样。</p>
+<p>通过翻阅代码，我们也可以发现，remove方法核心逻辑如下：</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide"><span class="hljs-function"><span class="hljs-keyword">private</span> <span class="hljs-keyword">void</span> <span class="hljs-title">fastRemove</span>(<span class="hljs-params"><span class="hljs-built_in">int</span> index</span>)</span> {
+    modCount++;
+    <span class="hljs-built_in">int</span> numMoved = size - index - <span class="hljs-number">1</span>;
+    <span class="hljs-keyword">if</span> (numMoved &gt; <span class="hljs-number">0</span>)
+        System.arraycopy(elementData, index+<span class="hljs-number">1</span>, elementData, index,
+                         numMoved);
+    elementData[--size] = <span class="hljs-literal">null</span>; <span class="hljs-comment">// clear to let GC do its work</span>
+}
+</code></pre>
+<p>可以看到，它只修改了modCount，并没有对expectedModCount做任何操作。</p>
+<p>所以导致产生异常的原因是：<code>remove</code>和<code>add</code>操作会导致<code>modCount</code>和迭代器中的<code>expectedModCount</code>不一致。</p>
+<h2 id="正确姿势">正确姿势<button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E6%AD%A3%E7%A1%AE%E5%A7%BF%E5%8A%BF" class="esa-anchor">#</a></h2>
+<p>至此，我们介绍清楚了不能在foreach循环体中直接对集合进行add/remove操作的原因。</p>
+<p>但是，很多时候，我们是有需求需要过滤集合的，比如删除其中一部分元素，那么应该如何做呢？有几种方法可供参考：</p>
+<p><strong>1、直接使用普通for循环进行操作</strong></p>
+<p>我们说不能在foreach中进行，但是使用普通的for循环还是可以的，因为普通for循环并没有用到Iterator的遍历，所以压根就没有进行fail-fast的检验。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide">    List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;() {{
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"Hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"HollisChuang"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"H"</span>);
+    }};
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-built_in">int</span> i = <span class="hljs-number">0</span>; i &lt; <span class="hljs-number">1</span>; i++) {
+        <span class="hljs-keyword">if</span> (userNames.<span class="hljs-keyword">get</span>(i).<span class="hljs-keyword">equals</span>(<span class="hljs-string">"Hollis"</span>)) {
+            userNames.<span class="hljs-keyword">remove</span>(i);
+        }
+    }
+    System.<span class="hljs-keyword">out</span>.println(userNames);
+</code></pre>
+<p>这种方案其实存在一个问题，那就是remove操作会改变List中元素的下标，可能存在漏删的情况。<br>
+<strong>2、直接使用Iterator进行操作</strong></p>
+<p>除了直接使用普通for循环以外，我们还可以直接使用Iterator提供的remove方法。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide">    List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;() {{
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"Hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"HollisChuang"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"H"</span>);
+    }};
+
+    Iterator iterator = userNames.iterator();
+
+    <span class="hljs-keyword">while</span> (iterator.hasNext()) {
+        <span class="hljs-keyword">if</span> (iterator.next().<span class="hljs-keyword">equals</span>(<span class="hljs-string">"Hollis"</span>)) {
+            iterator.<span class="hljs-keyword">remove</span>();
+        }
+    }
+    System.<span class="hljs-keyword">out</span>.println(userNames);
+</code></pre>
+<p>如果直接使用Iterator提供的remove方法，那么就可以修改到expectedModCount的值。那么就不会再抛出异常了。其实现代码如下：</p>
+<p><a href="./什么是fail-fast - 程序员自由之路 - 博客园_files/15515125763808-1.jpg" data-title="" data-alt="-w375" data-lightbox="roadtrip"><img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/15515125763808-1.jpg" alt="-w375" loading="lazy" class="medium-zoom-image"></a>￼</p>
+<p><strong>3、使用Java 8中提供的filter过滤</strong></p>
+<p>Java 8中可以把集合转换成流，对于流有一种filter操作， 可以对原始 Stream 进行某项测试，通过测试的元素被留下来生成一个新 Stream。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide">    List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;() {{
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"Hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"HollisChuang"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"H"</span>);
+    }};
+
+    userNames = userNames.stream().filter(userName -&gt; !userName.<span class="hljs-keyword">equals</span>(<span class="hljs-string">"Hollis"</span>)).collect(Collectors.toList());
+    System.<span class="hljs-keyword">out</span>.println(userNames);
+</code></pre>
+<p><strong>4、使用增强for循环其实也可以</strong></p>
+<p>如果，我们非常确定在一个集合中，某个即将删除的元素只包含一个的话， 比如对Set进行操作，那么其实也是可以使用增强for循环的，只要在删除之后，立刻结束循环体，不要再继续进行遍历就可以了，也就是说不让代码执行到下一次的next方法。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide">    List&lt;String&gt; userNames = <span class="hljs-keyword">new</span> ArrayList&lt;String&gt;() {{
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"Hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"hollis"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"HollisChuang"</span>);
+        <span class="hljs-keyword">add</span>(<span class="hljs-string">"H"</span>);
+    }};
+
+    <span class="hljs-keyword">for</span> (String userName : userNames) {
+        <span class="hljs-keyword">if</span> (userName.<span class="hljs-keyword">equals</span>(<span class="hljs-string">"Hollis"</span>)) {
+            userNames.<span class="hljs-keyword">remove</span>(userName);
+            <span class="hljs-keyword">break</span>;
+        }
+    }
+    System.<span class="hljs-keyword">out</span>.println(userNames);
+</code></pre>
+<p><strong>5、直接使用fail-safe的集合类</strong></p>
+<p>在Java中，除了一些普通的集合类以外，还有一些采用了fail-safe机制的集合类。这样的集合容器在遍历时不是直接在集合内容上访问的，而是先复制原有集合内容，在拷贝的集合上进行遍历。</p>
+<p>由于迭代时是对原集合的拷贝进行遍历，所以在遍历过程中对原集合所作的修改并不能被迭代器检测到，所以不会触发ConcurrentModificationException。</p>
+<pre class="highlighter-hljs" highlighted="true"><code class="highlighter-hljs hljs language-csharp hljsln ln-hide">ConcurrentLinkedDeque&lt;String&gt; userNames = <span class="hljs-keyword">new</span> ConcurrentLinkedDeque&lt;String&gt;() {{
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"Hollis"</span>);
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"hollis"</span>);
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"HollisChuang"</span>);
+    <span class="hljs-keyword">add</span>(<span class="hljs-string">"H"</span>);
+}};
+
+<span class="hljs-keyword">for</span> (String userName : userNames) {
+    <span class="hljs-keyword">if</span> (userName.<span class="hljs-keyword">equals</span>(<span class="hljs-string">"Hollis"</span>)) {
+        userNames.<span class="hljs-keyword">remove</span>();
+    }
+}
+</code></pre>
+<p>基于拷贝内容的优点是避免了ConcurrentModificationException，但同样地，迭代器并不能访问到修改后的内容，即：迭代器遍历的是开始遍历那一刻拿到的集合拷贝，在遍历期间原集合发生的修改迭代器是不知道的。</p>
+<p>java.util.concurrent包下的容器都是安全失败，可以在多线程下并发使用，并发修改。</p>
+<h2 id="总结">总结<button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E6%80%BB%E7%BB%93" class="esa-anchor">#</a></h2>
+<p>我们使用的增强for循环，其实是Java提供的语法糖，其实现原理是借助Iterator进行元素的遍历。</p>
+<p>但是如果在遍历过程中，不通过Iterator，而是通过集合类自身的方法对集合进行添加/删除操作。那么在Iterator进行下一次的遍历时，经检测发现有一次集合的修改操作并未通过自身进行，那么可能是发生了并发被其他线程执行的，这时候就会抛出异常，来提示用户可能发生了并发修改，这就是所谓的fail-fast机制。</p>
+<p>当然还是有很多种方法可以解决这类问题的。比如使用普通for循环、使用Iterator进行元素删除、使用Stream的filter、使用fail-safe的类等。</p>
+<h2 id="参考">参考<button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E5%8F%82%E8%80%83" class="esa-anchor">#</a></h2>
+<ul>
+<li><a href="https://www.hollischuang.com/archives/3542" target="_blank" rel="noopener nofollow">https://www.hollischuang.com/archives/3542</a></li>
+<li><a href="https://www.hollischuang.com/archives/3304" target="_blank" rel="noopener nofollow">https://www.hollischuang.com/archives/3304</a></li>
+</ul>
+<h2 id="公众号推荐">公众号推荐<button class="cnblogs-toc-button" title="显示目录导航" aria-expanded="false"></button><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E5%85%AC%E4%BC%97%E5%8F%B7%E6%8E%A8%E8%8D%90" class="esa-anchor">#</a></h2>
+<p>欢迎大家关注我的微信公众号「程序员自由之路」</p>
+<p><a href="./什么是fail-fast - 程序员自由之路 - 博客园_files/1775037-20200505091245079-544605853.jpg" data-title="" data-alt="" data-lightbox="roadtrip"><img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/1775037-20200505091245079-544605853.jpg" alt="" loading="lazy" class="medium-zoom-image"></a></p>
+
+</div>
+<div id="MySignature" role="contentinfo"><div class="esa-post-signature"> 
+                <p>作者：程序员自由之路</p> 
+                <p>出处：<a href="https://www.cnblogs.com/54chensongxia/p/12470446.html">https://www.cnblogs.com/54chensongxia/p/12470446.html</a></p> 
+                <p>版权：本作品采用「<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">署名-非商业性使用-相同方式共享 4.0 国际</a>」许可协议进行许可。</p> 
+                <p></p> 
+            </div></div>
+<div class="clear"></div>
+<div id="blog_post_info_block" role="contentinfo">
+
+
+<div id="BlogPostCategory" class="detail-post-categories">
+    分类: 
+            <a href="https://www.cnblogs.com/54chensongxia/category/1532231.html" target="_blank">01-Java基本功</a></div>
+<div id="EntryTag" class="detail-post-tags">
+    标签: 
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Java%E9%9B%86%E5%90%88/">Java集合</a>,             <a href="https://www.cnblogs.com/54chensongxia/tag/fail-safe/">fail-safe</a>,             <a href="https://www.cnblogs.com/54chensongxia/tag/fail-fast/">fail-fast</a></div>
+    <div id="blog_post_info">
+                <div class="esa-sponsor">
+                    <div class="title">Buy me a cup of coffee ☕.</div>
+                    <ul class="box">
+                        <li class="paypal"><svg t="1599893643429" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1307" width="25" height="25"><path d="M941.021887 369.059735c7.422144 34.295426 5.703717 73.709573-2.303424 116.524012-37.147285 188.515157-162.263434 253.632592-322.771878 253.632592h-25.154854c-19.414575 0-35.428857 14.295855-38.82915 33.710429l-2.303424 10.859-31.407006 197.655729-1.133431 8.555575c-3.985289 19.414575-19.999572 33.71043-39.414146 33.71043H334.30728c-16.014282 0-26.288285-13.125861-23.984861-29.140144 10.274003-63.984004 19.999572-127.968008 30.273575-191.952012s20.548006-127.383011 30.858571-191.367015c1.718428-13.710858 10.859-21.133002 24.569857-21.133003 22.85143 0 45.70286-0.584997 74.843004 0 41.132574 0.584997 88.553862-1.718428 134.805156-11.99243 61.68058-13.710858 117.694005-38.82915 163.945299-82.265148 41.717571-38.82915 69.687721-86.835434 88.553862-140.545435a515.893884 515.893884 0 0 0 19.999571-75.976435c1.133431-6.837148 2.851858-5.703717 6.837148-2.851858 31.407005 23.436427 49.139715 54.843432 55.976863 92.539151z m-98.242867-161.093441c0 46.836291-10.859 91.40572-26.288286 134.805156-29.688578 86.250437-85.702003 147.96758-172.537437 179.959582-46.287857 16.562716-94.842575 23.436427-143.98229 23.98486-34.295426 0.584997-68.55429 0-102.813154 0-37.147285 0-60.547149 18.281144-67.420859 54.843432-8.007141 43.435998-39.414146 245.662013-48.554718 302.772307-0.584997 3.985289-2.303424 5.703717-6.837148 5.703717H105.829543a27.494841 27.494841 0 0 1-27.421716-31.407005L210.946121 38.280716A45.995358 45.995358 0 0 1 256.063984 0h341.638019c24.569858 0 81.131717 10.859 119.412433 25.703288 81.131717 31.407005 125.664584 95.391009 125.664584 182.226444z" fill="var(--text-color)" p-id="1308"></path></svg></li>
+                        <li class="alipay"><svg t="1599893614075" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1025" width="25" height="25"><path d="M828.571429 624.342857c-44.228571-14.742857-103.657143-37.371429-169.714286-61.257143 39.771429-68.914286 71.428571-147.428571 92.228571-232.685714H533.142857v-78.4h266.971429v-43.771429H533.142857V77.714286h-109.028571c-19.085714 0-19.085714 18.857143-19.085715 18.857143v111.771428H135.085714v43.771429h270.057143v78.4H182.171429v43.771428h432.457142a762.491429 762.491429 0 0 1-62.285714 151.885715c-140.342857-46.171429-290.057143-83.657143-384.114286-60.571429-60.114286 14.857143-98.857143 41.257143-121.714285 68.914286-104.457143 126.857143-29.6 319.542857 191.085714 319.542857C368 853.942857 493.714286 781.257143 591.085714 661.714286 736.342857 731.428571 1024 851.085714 1024 851.085714V680.457143s-36.114286-2.857143-195.428571-56.114286zM217.028571 780.114286c-172 0-222.857143-135.2-137.828571-209.257143 28.342857-25.028571 80.228571-37.257143 107.885714-40 102.171429-10.057143 196.8 28.8 308.457143 83.2-78.628571 102.285714-178.628571 166.057143-278.514286 166.057143z" fill="var(--text-color)" p-id="1026"></path></svg></li>
+                        <li class="wechat"><svg t="1599893658389" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="1451" width="25" height="25"><path d="M1004.416 543.914667c-25.984-58.88-75.008-105.642667-131.925333-134.442667-100.437333-50.858667-225.322667-50.56-325.504 1.28-69.589333 35.712-127.701333 99.712-144.170667 177.578667-13.568 57.344-1.408 119.082667 29.013333 169.002666 45.269333 75.178667 127.104 123.178667 212.096 138.581334 61.568 12.501333 125.269333 5.077333 185.088-12.16 35.925333 13.909333 67.925333 36.437333 102.741334 53.162666a2238.762667 2238.762667 0 0 0-28.842667-89.685333c39.082667-27.733333 74.496-62.336 95.744-105.770667 31.744-60.373333 33.664-135.296 5.76-197.546666z m-423.424-403.882667c-106.453333-59.904-239.018667-68.906667-353.536-27.52-75.264 27.093333-143.36 77.44-185.429333 145.92-38.186667 61.866667-52.48 139.008-34.090667 209.792 18.474667 78.506667 73.002667 144.341333 139.178667 188.288-12.8 36.266667-24.96 72.490667-36.48 109.013333 41.6-21.76 83.2-44.501333 124.842666-66.602666 49.92 16 103.04 23.850667 156.16 22.101333a262.784 262.784 0 0 1-10.88-125.909333c9.6-58.496 41.6-112 85.077334-151.637334 73.642667-68.906667 177.962667-97.962667 277.162666-90.922666-18.602667-91.093333-82.602667-168.064-163.157333-212.48h1.152z m73.941333 426.197333c-8.917333 27.818667-49.322667 36.181333-68.906666 15.018667-21.589333-19.584-13.184-60.501333 15.146666-69.248 31.317333-13.226667 67.498667 22.912 53.76 54.229333z m204.586667 3.925334c-10.922667 25.002667-48.682667 30.848-67.242667 11.52-8.917333-8.149333-11.52-20.437333-14.677333-31.146667 4.437333-19.541333 17.92-39.808 39.68-40.746667 30.08-4.181333 57.002667 32.981333 41.6 60.416h0.64zM554.24 294.784c0.341333 41.002667-54.4 66.602667-85.12 38.784-31.872-22.826667-22.826667-78.378667 14.592-89.856 33.493333-13.44 73.088 14.677333 70.442667 50.56l0.085333 0.512z m-258.517333 10.410667c-7.338667 35.626667-55.082667 52.821333-83.029334 28.928-32.384-22.826667-23.296-79.402667 14.72-90.922667 37.248-14.336 79.573333 23.466667 68.309334 61.994667z" fill="var(--text-color)" p-id="1452"></path></svg><i class="fa fa-fwechat"></i></li>
+                    </ul>
+                    <div class="qrshow">
+                        <img src="https://www.cnblogs.com/54chensongxia/p/12470446.html">
+                    </div>
+                </div>
+<div id="green_channel">
+        <a href="javascript:void(0);" id="green_channel_digg" onclick="DiggIt(12470446,cb_blogId,1);green_channel_success(this,&#39;谢谢推荐！&#39;);">好文要顶</a>
+        <a id="green_channel_follow" onclick="follow(&#39;df6ea073-e28e-41d9-1178-08d726047f40&#39;);" href="javascript:void(0);">关注我</a>
+    <a id="green_channel_favorite" onclick="AddToWz(cb_entryId);return false;" href="javascript:void(0);">收藏该文</a>
+    <a id="green_channel_wechat" href="javascript:void(0);" onclick="shareManager.wechatShare()">微信分享</a>
+</div>
+<div id="author_profile">
+    <div id="author_profile_info" class="author_profile_info">
+            <a href="https://home.cnblogs.com/u/54chensongxia/" target="_blank"><img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/20190828231333.png" class="author_avatar" alt=""></a>
+        <div id="author_profile_detail" class="author_profile_info">
+            <a href="https://home.cnblogs.com/u/54chensongxia/">程序员自由之路</a>
+            <br>
+            <a href="https://home.cnblogs.com/u/54chensongxia/followers/">粉丝 - <span class="follower-count">303</span></a>
+            <a href="https://home.cnblogs.com/u/54chensongxia/followees/">关注 - <span class="following-count">19</span></a><br>
+        </div>
+    </div>
+    <div class="clear"></div>
+    <div id="author_profile_honor"></div>
+    <div id="author_profile_follow" class="follow-tip">
+                <a href="javascript:void(0);" onclick="follow(&#39;df6ea073-e28e-41d9-1178-08d726047f40&#39;);return false;">+加关注</a>
+    </div>
+</div>
+<div id="div_digg">
+    <div class="diggit" onclick="votePost(12470446,&#39;Digg&#39;)">
+        <span class="diggnum" id="digg_count">8</span>
+    </div>
+    <div class="buryit" onclick="votePost(12470446,&#39;Bury&#39;)">
+        <span class="burynum" id="bury_count">0</span>
+    </div>
+    <div class="clear"></div>
+    <div class="diggword" id="digg_tips">
+    </div>
+</div>
+
+<script type="text/javascript">
+    currentDiggType = 0;
+</script>
+</div>
+    <div class="clear"></div>
+    <div id="post_next_prev">
+
+    <a href="https://www.cnblogs.com/54chensongxia/p/12930610.html" class="p_n_p_prefix">« </a> 上一篇：    <a href="https://www.cnblogs.com/54chensongxia/p/12930610.html" data-featured-image="" title="发布于 2020-05-21 14:32">NullPointerException 没有打印异常栈问题追踪</a>
+    <br>
+    <a href="https://www.cnblogs.com/54chensongxia/p/12994130.html" class="p_n_p_prefix">» </a> 下一篇：    <a href="https://www.cnblogs.com/54chensongxia/p/12994130.html" data-featured-image="" title="发布于 2020-05-30 18:19">JVM系列.JDK演进历史</a>
+
+</div>
+</div>
+            </div>
+            <div class="postDesc">posted @ 
+<span id="post-date" data-last-update-days="25.945138888888888" data-date-updated="2020-06-24 13:49" aria-expanded="false">2020-05-29 15:08</span>&nbsp;
+<a href="https://www.cnblogs.com/54chensongxia">程序员自由之路</a>&nbsp;
+阅读(<span id="post_view_count">21609</span>)&nbsp;
+评论(<span id="post_comment_count">1</span>)&nbsp;
+&nbsp;
+<a href="javascript:void(0)" onclick="AddToWz(12470446);return false;">收藏</a>&nbsp;
+<a href="javascript:void(0)" onclick="reportManager.report({ currentUserId: &#39;&#39;, targetType: &#39;blogPost&#39;, targetId: &#39;12470446&#39;, targetLink: &#39;https://www.cnblogs.com/54chensongxia/p/12470446.html&#39;, title: &#39;什么是fail-fast&#39; })">举报</a>
+</div>
+        </div>
+	    
+	    
+    </div><!--end: topics 文章、评论容器-->
+</div>
+<script>
+    var cb_entryId = 12470446, cb_entryCreatedDate = '2020-05-29 15:08', cb_postType = 1, cb_postTitle = '什么是fail-fast';
+    var allowComments = true, cb_blogId = 535435, cb_blogApp = '54chensongxia', cb_blogUserGuid = 'df6ea073-e28e-41d9-1178-08d726047f40';
+    mermaidRender.render()
+    markdown_highlight()
+    zoomManager.apply("#cnblogs_post_body img:not(.code_img_closed):not(.code_img_opened)");    
+</script>
+<a id="!comments"></a>
+<div id="blog-comments-placeholder"></div>
+<div id="comment_form" class="commentform">
+    <a name="commentform"></a>
+    <div id="divCommentShow"></div>
+    <div id="comment_nav">
+        <div class="comment-nav-right">
+            <span id="span_refresh_tips"></span><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#" onclick="return RefreshPage();">刷新页面</a><a href="https://www.cnblogs.com/54chensongxia/p/12470446.html#top">返回顶部</a>
+        </div>
+    </div>
+    <div id="comment_form_container"><div class="login_tips">
+    登录后才能查看或发表评论，立即 <a rel="nofollow" href="javascript:void(0);" class="underline" onclick="return account.login(&#39;!comments&#39;);">登录</a> 或者
+    <a href="https://www.cnblogs.com/">逛逛</a> 博客园首页
+</div>
+</div>
+    <div class="ad_text_commentbox" id="ad_text_under_commentbox"></div>
+        <div id="cnblogs_ch"><a href="http://www.uccpsoft.com/index.htm" target="_blank" onclick="gtag(&#39;event&#39;, &#39;click&#39;, {&#39;event_category&#39;: &#39;ad&#39;, &#39;event_label&#39;: &#39;T2-UCanCode&#39;})">【推荐】100%开源！大型工业跨平台软件C++源码提供，建模，组态！</a><br><a href="https://www.cnblogs.com/cmt/p/18950170" target="_blank" onclick="gtag(&#39;event&#39;, &#39;click&#39;, {&#39;event_category&#39;: &#39;ad&#39;, &#39;event_label&#39;: &#39;T2-FlashTable&#39;})">【推荐】FlashTable：表单开发界的极速跑车，让你的开发效率一路狂飙</a><br><a href="https://www.cnblogs.com/HarmonyOS5/p/18867837" target="_blank" onclick="gtag(&#39;event&#39;, &#39;click&#39;, {&#39;event_category&#39;: &#39;ad&#39;, &#39;event_label&#39;: &#39;T2-HarmonyOS&#39;})">【推荐】Flutter适配HarmonyOS 5知识地图，实战解析+高频避坑指南</a><br><a href="https://www.cnblogs.com/cmt/p/18894723" target="_blank" onclick="gtag(&#39;event&#39;, &#39;click&#39;, {&#39;event_category&#39;: &#39;ad&#39;, &#39;event_label&#39;: &#39;T2-山川屿你&#39;})">【推荐】博客园的心动：当一群程序员决定开源共建一个真诚相亲平台</a><br><a href="http://ishell.cc/" target="_blank" onclick="gtag(&#39;event&#39;, &#39;click&#39;, {&#39;event_category&#39;: &#39;ad&#39;, &#39;event_label&#39;: &#39;T2-IShell&#39;})">【推荐】轻量又高性能的 SSH 工具 IShell：AI 加持，快人一步</a><br></div>
+    <div id="opt_under_post"></div>
+        <div id="blog_c1" class="under-post-card">
+            <a href="https://www.cnblogs.com/cmt/p/18894723" rel="nofollow" target="_blank" onclick="countCreativeClicks(&#39;C1-山川屿你&#39;)">
+                <img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/35695-20250621065725472-980862142.webp" onload="countCreativeImpressions(&#39;C1-山川屿你&#39;)" alt="" style="width:300px!important;height:250px!important;min-width:300px!important;max-width:300px!important;">
+                <span id="c1_impression" style="display:none"></span>
+            </a>
+        </div>
+    <div id="under_post_card1"><div class="under-post-card">
+<b>编辑推荐：</b>
+<br>
+
+· <a href="https://www.cnblogs.com/tcjiaan/p/18956032" target="_blank">DbContext是如何识别出实体集合的</a>
+    <br>
+· <a href="https://www.cnblogs.com/Cookies-Tang/p/18956241" target="_blank">一次 .NET 性能优化之旅：将 GC 压力降低 99%</a>
+    <br>
+· <a href="https://www.cnblogs.com/damaoa/p/18952729" target="_blank">MySQL索引完全指南：让你的查询速度飞起来</a>
+    <br>
+· <a href="https://www.cnblogs.com/yhup/p/18945895" target="_blank">一个字符串替换引发的性能血案：正则回溯与救赎之路</a>
+    <br>
+· <a href="https://www.cnblogs.com/lmy5215006/p/18919081" target="_blank">为什么说方法的参数最好不要超过4个？</a>
+    <br>
+</div></div>
+    <div id="under_post_card2"><div class="itnews under-post-card">
+    <b>阅读排行：</b>
+    <br>
+ ·          <a href="https://www.cnblogs.com/Cookies-Tang/p/18956241" target="_blank">一次 .NET 性能优化之旅：将 GC 压力降低 99%</a>
+        <br>
+ ·          <a href="https://www.cnblogs.com/anding/p/18940828" target="_blank">C#.Net筑基-泛型T &amp; 协变逆变</a>
+        <br>
+ ·          <a href="https://www.cnblogs.com/yychuyu/p/18956485" target="_blank">32岁入行STM32迟吗？</a>
+        <br>
+ ·          <a href="https://www.cnblogs.com/yupi/p/18957616" target="_blank">花150元，我用 AI 做出了千万播放的爆款视频！保姆级教程+完整提示词</a>
+        <br>
+ ·          <a href="https://www.cnblogs.com/tcjiaan/p/18956032" target="_blank">【EF Core】DbContext是如何识别出实体集合的</a>
+        <br>
+</div></div>
+    <div id="HistoryToday" class="under-post-card"></div>
+    <script type="text/javascript">
+        var commentManager = new blogCommentManager();
+        commentManager.renderComments(0);
+        fixPostBody();
+        window.footnoteTipManager.generateFootnoteTips();
+
+                                window.tocManager.displayDisableTocTips = false;
+                                window.tocManager.generateToc();
+            
+                                    setTimeout(function() { countViews(cb_blogId, cb_entryId); }, 50);
+            
+                                deliverT2();
+                                deliverC1C2();
+                                loadNewsAndKb();
+            
+                                    LoadPostCategoriesTags(cb_blogId, cb_entryId);
+            
+                                LoadPostInfoBlock(cb_blogId, cb_entryId, cb_blogApp, cb_blogUserGuid);
+                                GetPrevNextPost(cb_entryId, cb_blogId, cb_entryCreatedDate, cb_postType);
+                                loadOptUnderPost();
+                                GetHistoryToday(cb_blogId, cb_blogApp, cb_entryCreatedDate);
+                </script>
+</div>
+
+	</div>
+	</div>
+	<div id="sideBar">
+		<div id="sideBarMain"><img class="esa-profile-avatar" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/o_avatar.png">
+			<div id="sidebar_news" class="newsItem">
+    <h3 class="catListTitle">公告</h3>
+<div id="blog-news" class="sidebar-news">
+    <div id="sidebar_news_container">    <div id="sidebar_news_content">
+        <script type="text/javascript">window['__document_write_ajax_callbacks__']['4']();</script><script type="text/javascript">window['__document_write_ajax_callbacks__']['1']();</script>
+<script type="text/javascript">window['__document_write_ajax_callbacks__']['5']();</script><script type="text/javascript">window['__document_write_ajax_callbacks__']['6']();</script><script>window['__document_write_ajax_callbacks__']['2']();</script>
+    </div>
+<div id="profile_block">
+    昵称：
+    <a href="https://home.cnblogs.com/u/54chensongxia/">
+        程序员自由之路
+    </a>
+    <br>
+    园龄：
+    <a href="https://home.cnblogs.com/u/54chensongxia/" title="入园时间：2019-08-21">
+        5年10个月
+    </a>
+    <br>
+    粉丝：
+    <a class="follower-count" href="https://home.cnblogs.com/u/54chensongxia/followers/">
+        303
+    </a>
+    <br>
+    关注：
+    <a class="folowing-count" href="https://home.cnblogs.com/u/54chensongxia/followees/">
+        19
+    </a>
+    <div id="p_b_follow" class="follow-tip">
+<a href="javascript:void(0)" onclick="follow(&#39;df6ea073-e28e-41d9-1178-08d726047f40&#39;)">+加关注</a></div>
+    <script type="text/javascript">window['__document_write_ajax_callbacks__']['7']();</script><script>window['__document_write_ajax_callbacks__']['3']();</script>
+</div>
+</div>
+</div>
+<script>loadBlogNews();</script>
+
+ 
+</div>
+<div id="sidebar_c3"></div>
+			<div id="blog-calendar" style="display:none"></div><script>loadBlogDefaultCalendar();</script>			
+			<div id="leftcontentcontainer">
+				<div id="blog-sidecolumn"><div id="sidebar_search" class="sidebar-block">
+    <div class="mySearch my-search">
+        <h3 class="catListTitle">搜索</h3>
+        <div id="sidebar_search_box">
+            <div id="widget_my_zzk" class="div_my_zzk">
+                <input type="text" id="q" onkeydown="return zzk_go_enter(event);" class="input_my_zzk">&nbsp;<input onclick="zzk_go()" type="button" value="找找看" id="btnZzk" class="btn_my_zzk">
+            </div>
+            
+        </div>
+    </div>
+</div>
+
+
+
+
+
+<div id="sidebar_toptags" class="sidebar-block">
+    <div class="catListTag">
+    <h3 class="catListTitle"><a href="https://www.cnblogs.com/54chensongxia/tag/" class="sidebar-card-title-a">我的标签</a></h3>
+<ul>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Spring/">Spring<span class="tag-count">(14)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Tomcat/">Tomcat<span class="tag-count">(13)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Spring%20Boot/">Spring Boot<span class="tag-count">(9)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Linux/">Linux<span class="tag-count">(8)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/IDEA/">IDEA<span class="tag-count">(8)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/%E4%BC%A0%E9%80%81%E9%97%A8/">传送门<span class="tag-count">(8)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/nginx/">nginx<span class="tag-count">(7)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Redis/">Redis<span class="tag-count">(6)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/Java%E9%9B%86%E5%90%88/">Java集合<span class="tag-count">(6)</span></a>
+        </li>
+        <li>
+            <a href="https://www.cnblogs.com/54chensongxia/tag/MySQL/">MySQL<span class="tag-count">(5)</span></a>
+        </li>
+    <li>
+        <a href="https://www.cnblogs.com/54chensongxia/tag/">更多</a>
+    </li>
+
+</ul>
+</div>
+
+
+</div>
+
+<div id="sidebar_scorerank" class="sidebar-block">
+    <div class="catListBlogRank">
+<h3 class="catListTitle">积分与排名</h3>
+<ul>
+	<li class="liScore">
+		积分 -	
+522181
+	</li>
+	<li class="liRank">
+		排名 -	
+1336
+	</li>
+</ul>
+</div>
+
+
+
+
+</div>
+
+<div id="sidebar_categories">
+
+    <div id="sidebar_postcategory" class="catListPostCategory sidebar-block">
+        <h3 class="catListTitle">
+            
+    <a class="sidebar-card-title-a" href="https://www.cnblogs.com/54chensongxia/post-categories">随笔分类</a>
+<span class="sidebar-category-item-count">
+    (299)
+</span>
+
+
+        </h3>
+
+        <ul>
+
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1532231.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">01-Java基本功(40)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1583159.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">02-并发编程(40)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1777082.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">03-JVM系列(6)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1582732.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">05-操作系统原理(6)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1539388.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">07-数据结构和算法(23)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1589580.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">08-框架:MyBatis(14)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1545197.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">08-框架:Spring(28)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1532229.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">08-框架:Spring Boot(10)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1793060.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">08-框架:日志框架(1)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1797351.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">09-中间件:Nginx(10)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1853656.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">09-中间件:Tomcat(10)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1536558.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">10-数据库:MySQL(7)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1860824.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">10-数据库:Redis(7)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1916230.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">11-分布式&amp;微服务(7)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="true" style="display: block">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1602126.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">11-设计模式(19)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1916231.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">11-系统架构(1)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1562134.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">12-网络安全(8)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1534847.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">13-软件工具(31)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1558803.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">14-系统功能设计(9)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1539792.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">15-问题解决(10)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1605311.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">16-工作经验(7)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1661031.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">17-测试相关(3)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1894229.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">18-性能优化(1)</a>
+ 
+                </li>                
+                <li data-category-list-item-visible="false" style="display: none">
+                    <a href="https://www.cnblogs.com/54chensongxia/category/1793057.html" style="--cnb-category-item-link-indent-size: calc(0 * 1em)" class="category-item-link " rel="" target="">19-源码阅读(1)</a>
+ 
+                </li>                
+            <li>
+                <a href="javascript:void(0)" onclick="sideColumnManager.loadMore(this)">更多</a>
+            </li>
+        </ul>
+
+
+    </div>    
+</div>
+
+<div id="sidebar_topviewedposts" class="sidebar-block">
+    <div class="catListView">
+    <h3 class="catListTitle">
+        <a href="https://www.cnblogs.com/54chensongxia/most-viewed" class="sidebar-card-title-a">
+    阅读排行榜
+</a>
+
+    </h3>
+    <div id="TopViewPostsBlock">
+        <ul style="word-break:break-all">
+                    <li>
+                        <a href="https://www.cnblogs.com/54chensongxia/p/13236965.html">
+                            1. 程序员必备画图技能之——时序图(162826)
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://www.cnblogs.com/54chensongxia/p/12938929.html">
+                            2. Nginx配置文件详解(155527)
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://www.cnblogs.com/54chensongxia/p/12091304.html">
+                            3. 程序员必备画图技能之——流程图(80086)
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://www.cnblogs.com/54chensongxia/p/11414923.html">
+                            4. RestTemplate 最详解(63706)
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://www.cnblogs.com/54chensongxia/p/15138314.html">
+                            5. /var/lib/docker/overlay2 占用很大，清理Docker占用的磁盘空间(36955)
+                        </a>
+                    </li>
+        </ul>
+    </div>
+</div>
+</div>
+
+
+
+<div id="sidebar_topdiggedposts" class="sidebar-block">
+    
+<div id="topdigg_posts_wrap">
+    <div class="catListView">
+        <h3 class="catListTitle">
+            <a href="https://www.cnblogs.com/54chensongxia/most-liked" class="sidebar-card-title-a">推荐排行榜</a>
+
+        </h3>
+        <div id="TopDiggPostsBlock">
+            <ul style="word-break: break-all">
+                        <li>
+                            <a href="https://www.cnblogs.com/54chensongxia/p/13236965.html">
+                                1. 程序员必备画图技能之——时序图(37)
+                            </a>
+                        </li>
+                        <li>
+                            <a href="https://www.cnblogs.com/54chensongxia/p/12938929.html">
+                                2. Nginx配置文件详解(30)
+                            </a>
+                        </li>
+                        <li>
+                            <a href="https://www.cnblogs.com/54chensongxia/p/12091304.html">
+                                3. 程序员必备画图技能之——流程图(27)
+                            </a>
+                        </li>
+                        <li>
+                            <a href="https://www.cnblogs.com/54chensongxia/p/12530268.html">
+                                4. 扫码登陆原理简析(16)
+                            </a>
+                        </li>
+                        <li>
+                            <a href="https://www.cnblogs.com/54chensongxia/p/13491214.html">
+                                5. 基于token的登陆验证机制(13)
+                            </a>
+                        </li>
+            </ul>
+        </div>
+    </div>
+</div>
+</div></div>
+                    <script>loadBlogSideColumn();</script>
+			</div>			
+		</div>
+	</div>
+	<div class="clear"></div>
+	</div>
+	<div class="clear"></div>
+	<div id="footer">
+		<a href="https://www.cnblogs.com/" id="footer_site_link" class="footer-brand">博客园</a>
+<span class="footer-copyright"> &nbsp;©&nbsp; 2004-2025</span>
+<br><span class="footer-icp">
+    <a target="_blank" href="http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=33010602011771"><img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/ghs.png">浙公网安备 33010602011771号</a>
+    <a href="https://beian.miit.gov.cn/" target="_blank">浙ICP备2021040463号-3</a>
+</span>
+
+
+
+	<span class="esa-copyright">&amp; Theme <a href="https://github.com/esofar/cnblogs-theme-silence" target="_blank">Silence v3.0.0</a></span></div>
+</div>
+
+
+
+    
+
+    <input type="hidden" id="antiforgery_token" value="CfDJ8Ct_7-Gh-gZNte6RB_khjDp0Kvym7IWCIeyoVxZaMnWjpuvzHu9wX9nayC7fK_zxADV6kajvF0_j1lXSIGrn03NrB4AWkPCAbGyH8masareFhVXc_p7ptK8Qa3pduhsXiuuZsN63PZ1m40zes0kOXdo">
+    <script async="" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/js"></script>
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-M95P3TTWJZ');
+</script>
+<script defer="" src="./什么是fail-fast - 程序员自由之路 - 博客园_files/hm.js.下载"></script>
+
+
+<div style="z-index: 998; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: none; flex-direction: column; align-items: center; justify-content: center">
+<div style="background: #fff;padding: 30px; margin: 30px; border-radius: 16px;">
+  <div style="width: 200px; height: 200px; background: rgba(255, 255, 255, 0.8); position: absolute; top: -100px; right: -100px; border-radius: 100px"></div>
+  <div style="text-align: center; font-size: 18px; margin-bottom: 10px;">点击右上角即可分享</div>
+  <img src="./什么是fail-fast - 程序员自由之路 - 博客园_files/35695-20230906145857937-1471873834.gif" alt="微信分享提示">
+</div>   
+    </div><script type="text/javascript">
+    window.$silence = {
+        avatar: 'https://images.cnblogs.com/cnblogs_com/54chensongxia/1540920/o_avatar.png',
+        favicon: 'https://images.cnblogs.com/cnblogs_com/54chensongxia/1540920/t_avatar.png?t=1622447881429',
+        defaultMode: 'light',
+        defaultTheme: 'c',
+        showNavAdmin: true,
+        hljsln: false,
+        navbars: [
+            {
+                title: '标签',
+               url: 'https://www.cnblogs.com/54chensongxia/tag/'
+            }, 
+            {
+                title: '归档',
+                url: 'https://www.cnblogs.com/54chensongxia/p/'
+            }
+        ],
+
+        catalog: {
+            enable: true,
+            index: true,
+            active: false,
+            levels: ['h2', 'h3', 'h4']
+        },
+
+        signature: {
+            enable: true,
+            author: null,
+            license: ['署名-非商业性使用-相同方式共享 4.0 国际', 'https://creativecommons.org/licenses/by-nc-sa/4.0/']
+        },
+
+        sponsor: {
+            enable: true,
+            text: 'Buy me a cup of coffee ☕.',
+            paypal: null,
+            wechat: 'https://www.cnblogs.com/images/cnblogs_com/54chensongxia/1540920/t_wechatpay.png',
+            alipay: 'https://www.cnblogs.com/images/cnblogs_com/54chensongxia/1540920/t_alipay.png'
+        }
+    };
+</script><div class="esa-toolbar">
+        <div class="bars bars-show"><i class="fa fa-ellipsis-h"></i></div>
+        <span class="up up-show" title="返回顶部"><i class="fa fa-chevron-up"></i></span>
+        <span class="mode mode-show" title="切换模式"><i class="fa fa-adjust"></i></span>
+        <span class="skin skin-show" title="主题设置"><i class="fa fa-cog"></i></span>
+        <div class="skin-popup">
+            <div class="item">
+                <div class="title">主题色彩</div>
+                <div class="themes">
+                    <button data-theme="a" style="background: #2D8CF0;"></button>
+                    <button data-theme="b" style="background: #FA7298;"></button>
+                    <button data-theme="c" style="background: #42B983;"></button>
+                    <button data-theme="d" style="background: #607D8B;"></button>
+                    <button data-theme="e" style="background: #5E72E4;"></button>
+                    <button data-theme="f" style="background: #FF9700;"></button>
+                    <button data-theme="g" style="background: #FF5722;"></button>
+                    <button data-theme="h" style="background: #009688;"></button>
+                    <button data-theme="i" style="background: #673BB7;"></button>
+                    <button data-theme="j" style="background: #906f61;"></button>
+                </div>
+            </div>
+        </div>
+        <span class="contents contents-show" title="阅读目录"><i class="fa fa-list-ul"></i></span></div>
+    <div class="esa-contents noactive"><ul><li class="h2" title="fail-fast">
+                    <a class="esa-anchor-link" href="https://www.cnblogs.com/54chensongxia/p/12470446.html#fail-fast"><span class="level1">1. </span>fail-fast</a>
+                 </li><li class="h2" title="集合中的fail-fast机制">
+                    <a class="esa-anchor-link" href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E9%9B%86%E5%90%88%E4%B8%AD%E7%9A%84fail-fast%E6%9C%BA%E5%88%B6"><span class="level1">2. </span>集合中的fail-fast机制</a>
+                 </li><li class="h2" title="正确姿势">
+                    <a class="esa-anchor-link" href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E6%AD%A3%E7%A1%AE%E5%A7%BF%E5%8A%BF"><span class="level1">3. </span>正确姿势</a>
+                 </li><li class="h2" title="总结">
+                    <a class="esa-anchor-link" href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E6%80%BB%E7%BB%93"><span class="level1">4. </span>总结</a>
+                 </li><li class="h2" title="参考">
+                    <a class="esa-anchor-link" href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E5%8F%82%E8%80%83"><span class="level1">5. </span>参考</a>
+                 </li><li class="h2" title="公众号推荐">
+                    <a class="esa-anchor-link" href="https://www.cnblogs.com/54chensongxia/p/12470446.html#%E5%85%AC%E4%BC%97%E5%8F%B7%E6%8E%A8%E8%8D%90"><span class="level1">6. </span>公众号推荐</a>
+                 </li></ul></div><script type="text/javascript">getFollowStatus('df6ea073-e28e-41d9-1178-08d726047f40');</script><div id="lightboxOverlay" tabindex="-1" class="lightboxOverlay" style="display: none;"></div><div id="lightbox" tabindex="-1" class="lightbox" style="display: none;"><div class="lb-outerContainer"><div class="lb-container"><img class="lb-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" alt=""><div class="lb-nav"><a class="lb-prev" aria-label="Previous image" href="https://www.cnblogs.com/54chensongxia/p/12470446.html"></a><a class="lb-next" aria-label="Next image" href="https://www.cnblogs.com/54chensongxia/p/12470446.html"></a></div><div class="lb-loader"><a class="lb-cancel"></a></div></div></div><div class="lb-dataContainer"><div class="lb-data"><div class="lb-details"><span class="lb-caption"></span><span class="lb-number"></span></div><div class="lb-closeContainer"><a class="lb-close"></a></div></div></div></div></body></html>
