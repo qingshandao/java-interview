@@ -123,11 +123,11 @@ private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 
 
 
-### 6、ArrayList 所包含的元素个数
+### 6、ArrayList 实际所包含的元素个数
 
 ```java
 	/**
-     * ArrayList 所包含的元素个数
+     * ArrayList 实际所包含的元素个数
      */
     private int size;
 ```
@@ -137,7 +137,7 @@ private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 ### 7、构造函数 —— 带初始容量
 
 ```java
-/**
+	/**
      * 带初始容量参数的构造函数（用户可以在创建ArrayList对象时自己指定集合的初始大小）
      */
     public ArrayList(int initialCapacity) {
@@ -195,58 +195,239 @@ private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
 
 
 
-### 10、
+### 10、最小化ArrayList实例的容量
+
+`trimToSize()` 方法是 `ArrayList` 提供的一个 **容量优化方法**，它的作用是把底层数组 `elementData` 的容量收缩到刚好和当前元素个数 `size` 相同，来节省内存空间。
 
 ```java
-    
-
-    /**
-     * 修改这个ArrayList实例的容量是列表的当前大小。 应用程序可以使用此操作来最小化ArrayList实例的存储。
-     */
-    public void trimToSize() {
-        modCount++;
-        if (size < elementData.length) {
-            elementData = (size == 0)
-                    ? EMPTY_ELEMENTDATA
-                    : Arrays.copyOf(elementData, size);
-        }
+public void trimToSize() {
+    modCount++;
+    if (size < elementData.length) {
+        elementData = (size == 0)
+                ? EMPTY_ELEMENTDATA
+                : Arrays.copyOf(elementData, size);
     }
-//下面是ArrayList的扩容机制
-//ArrayList的扩容机制提高了性能，如果每次只扩充一个，
-//那么频繁的插入会导致频繁的拷贝，降低性能，而ArrayList的扩容机制避免了这种情况。
+}
+```
 
-    /**
-     * 如有必要，增加此ArrayList实例的容量，以确保它至少能容纳元素的数量
-     *
-     * @param minCapacity 所需的最小容量
-     */
-    public void ensureCapacity(int minCapacity) {
-        // 如果不是默认空数组，则minExpand的值为0；
-        // 如果是默认空数组，则minExpand的值为10
-        int minExpand = (elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
-                // 如果不是默认元素表，则可以使用任意大小
-                ? 0
-                // 如果是默认空数组，它应该已经是默认大小
-                : DEFAULT_CAPACITY;
+> ① `modCount++`
+>
+> ```java
+> modCount++;
+> ```
+>
+> * `modCount` 是 `ArrayList` 从 `AbstractList` 继承来的字段，用于记录结构性修改次数。
+> * 当集合结构发生变化（比如改变容量、添加、删除元素等），`modCount` 会加 1。
+> * 这个变量主要用于快速失败（fail-fast）机制，比如在遍历时如果有其他线程修改，会抛出 `ConcurrentModificationException`。
+>
+> ------
+>
+> ② 判断是否需要收缩
+>
+> ```java
+> if (size < elementData.length) {
+> ```
+>
+> * 判断当前实际元素个数 `size` 是否小于数组容量。
+> * 如果相等，说明数组已经刚好合适，无需操作。
+>
+> ------
+>
+> ③ 收缩数组
+> ```java
+> elementData = (size == 0)
+>     ? EMPTY_ELEMENTDATA
+>     : Arrays.copyOf(elementData, size);
+> ```
+>
+> **两种情况：**
+>
+> ✅ 情况 1：当前没有任何元素（`size == 0`）
+>
+> ```java
+> elementData = EMPTY_ELEMENTDATA;
+> ```
+>
+> * 直接将底层数组指向一个共享的空数组 `EMPTY_ELEMENTDATA`，这样可以避免占用内存。
+>
+> ✅ 情况 2：当前有元素（`size > 0`）
+>
+> ```java
+> elementData = Arrays.copyOf(elementData, size);
+> ```
+>
+> * 调用 `Arrays.copyOf()`，将原来的数组复制一份，长度只保留到 `size`，丢弃后面多余的容量。
+>
+> 
+>
+> **💭 为什么需要 `trimToSize()`？**
+>
+> `ArrayList` 默认会预留容量（比如扩容时会按 1.5 倍左右增长），在大量元素删除后，底层数组依然保持原来的容量，浪费内存。如果后面不再添加元素，就可以调用 `trimToSize()` 来节省空间。
 
-        // 如果最小容量大于已有的最大容量
-        if (minCapacity > minExpand) {
-            // 根据需要的最小容量，确保容量足够
-            ensureExplicitCapacity(minCapacity);
-        }
+
+
+### 11、扩容机制
+
+确保底层数组容量至少能容纳 `minCapacity` 个元素。如果不够，就会扩容。
+
+```java
+public void ensureCapacity(int minCapacity) {
+    int minExpand = (elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
+            ? 0
+            : DEFAULT_CAPACITY;
+
+    if (minCapacity > minExpand) {
+        ensureExplicitCapacity(minCapacity);
     }
+}
+```
+
+> ① 定义 `minExpand`
+>
+> ```java
+> int minExpand = (elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA)
+>         ? 0
+>         : DEFAULT_CAPACITY;
+> ```
+>
+> 🔎 这里的逻辑含义：
+>
+> * `elementData != DEFAULTCAPACITY_EMPTY_ELEMENTDATA`
+> 	* 如果当前底层数组不是默认空数组（也就是说已经有过容量分配或者非空初始化过），则 `minExpand = 0`，表示可以按实际需要的最小容量来扩容。
+> * 否则（还处于默认空数组状态），`minExpand = DEFAULT_CAPACITY`（即 10）。因为 ArrayList 默认首次分配时，容量最小为 10。
+>
+> ✅ 总结：
+>
+> | 情况           | minExpand 的值 |
+> | -------------- | -------------- |
+> | 不是默认空数组 | 0              |
+> | 是默认空数组   | 10             |
+
+> ② 判断是否需要扩容
+>
+> ```java
+> if (minCapacity > minExpand) {
+>     ensureExplicitCapacity(minCapacity);
+> }
+> ```
+>
+> 这里检查传入的 `minCapacity` 是否大于 `minExpand`。
+>
+> * 如果大于，表示需要扩容，就调用 `ensureExplicitCapacity(minCapacity)`.
+> * 如果不大于，则不做任何操作（容量足够）。
+
+> ③ 调用 `ensureExplicitCapacity`
+>
+> ```java
+> private void ensureExplicitCapacity(int minCapacity) {
+>     modCount++;
+> 
+>     // overflow-conscious code
+>     if (minCapacity - elementData.length > 0)
+>         grow(minCapacity);
+> }
+> ```
+>
+> **解释：**
+>
+> * `modCount++`：记录结构性修改（用于 fail-fast）。
+> * 判断 `minCapacity - elementData.length > 0`
+> 	* 如果成立，表示 `minCapacity` 超过当前底层数组容量，必须扩容，进入 `grow(minCapacity)` 方法。
+
+> ④ `grow()` 方法（核心）
+>
+> ```java
+> private void grow(int minCapacity) {
+>     int oldCapacity = elementData.length;
+>     int newCapacity = oldCapacity + (oldCapacity >> 1); // 1.5倍扩容
+> 
+>     if (newCapacity - minCapacity < 0)
+>         newCapacity = minCapacity;
+> 
+>     if (newCapacity - MAX_ARRAY_SIZE > 0)
+>         newCapacity = hugeCapacity(minCapacity);
+> 
+>     elementData = Arrays.copyOf(elementData, newCapacity);
+> }
+> ```
+>
+> **核心逻辑：**
+>
+> * 默认扩容为原容量的 1.5 倍：`oldCapacity + (oldCapacity >> 1)`
+> * 如果 1.5 倍还不够，就直接使用 `minCapacity`。
+> * 如果超过 `MAX_ARRAY_SIZE`（大约是 `Integer.MAX_VALUE - 8`），做安全处理。
+
+> **🟡 为什么需要 `minExpand`？**
+>
+> 因为当 `ArrayList` 刚被创建时，如果你没有添加元素，它内部的数组实际上是一个空的共享空数组（`DEFAULTCAPACITY_EMPTY_ELEMENTDATA`），**为了节省内存，不会立即分配 10 个空间**。
+>
+> 只有在首次添加元素或调用 `ensureCapacity()` 且 `minCapacity > 10` 时，才会正式分配数组并初始化容量。
 
 
-    // 根据给定的最小容量和当前数组元素来计算所需容量。
-    private static int calculateCapacity(Object[] elementData, int minCapacity) {
-        // 如果当前数组元素为空数组（初始情况），返回默认容量和最小容量中的较大值作为所需容量
-        if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
-            return Math.max(DEFAULT_CAPACITY, minCapacity);
-        }
-        // 否则直接返回最小容量
-        return minCapacity;
+
+### 12、计算所需容量
+
+用于在确定需要新容量时，计算应该分配的实际容量，它主要在「首次分配底层数组」时使用，保证默认情况下容量不会太小（默认至少 10）。
+
+```java
+private static int calculateCapacity(Object[] elementData, int minCapacity) {
+    if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        return Math.max(DEFAULT_CAPACITY, minCapacity);
     }
+    return minCapacity;
+}
+```
 
+
+
+### 13、确保内部容量达到指定最小容量
+
+当我们向 `ArrayList` 添加元素（比如 `add()`）时，都会先调用 `ensureCapacityInternal()`，以确保底层数组足够大。
+
+```java
+private void ensureCapacityInternal(int minCapacity) {
+    ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
+}
+```
+
+> ✅ 参数 `minCapacity`
+>
+> * 表示：**当前操作需要的最小容量**（比如当前 size + 1）
+
+```java
+private static int calculateCapacity(Object[] elementData, int minCapacity) {
+    if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
+        return Math.max(DEFAULT_CAPACITY, minCapacity);
+    }
+    return minCapacity;
+}
+```
+
+> ✅  含义总结：
+>
+> * 如果数组还没初始化（`elementData` 是默认空数组），则返回 `max(10, minCapacity)`，保证初次容量至少为 10。
+> * 如果数组已经初始化，直接返回 `minCapacity`。
+>
+> 👉 **此处主要解决初始容量问题**
+
+
+
+### 14、判断是否需要扩容
+
+```java
+private void ensureExplicitCapacity(int minCapacity) {
+    modCount++;
+    if (minCapacity - elementData.length > 0)
+        grow(minCapacity);
+}
+
+```
+
+
+
+
+
+```java
     // 确保内部容量达到指定的最小容量。
     private void ensureCapacityInternal(int minCapacity) {
         ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
