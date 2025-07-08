@@ -420,28 +420,29 @@ private void ensureExplicitCapacity(int minCapacity) {
     if (minCapacity - elementData.length > 0)
         grow(minCapacity);
 }
-
 ```
+
+>  ✅ 修改 `modCount`
+>
+> * `modCount++`：结构性修改计数（用于 fail-fast，比如遍历时检测并发修改）。
+>
+> ✅ 判断是否需要扩容
+>
+> ```java
+> if (minCapacity - elementData.length > 0)
+>     grow(minCapacity);
+> ```
+>
+> 含义：
+>
+> * 如果 `minCapacity > elementData.length`，就需要扩容。
+> * 否则容量足够，不需要操作。
 
 
 
 
 
 ```java
-    // 确保内部容量达到指定的最小容量。
-    private void ensureCapacityInternal(int minCapacity) {
-        ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
-    }
-
-    //判断是否需要扩容
-    private void ensureExplicitCapacity(int minCapacity) {
-        modCount++;
-        // overflow-conscious code
-        if (minCapacity - elementData.length > 0)
-            //调用grow方法进行扩容，调用此方法代表已经开始扩容了
-            grow(minCapacity);
-    }
-
     /**
      * 要分配的最大数组大小
      */
