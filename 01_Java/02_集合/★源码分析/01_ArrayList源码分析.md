@@ -440,22 +440,16 @@ private void ensureExplicitCapacity(int minCapacity) {
 
 
 
-
+### 15、扩容核心机制
 
 ```java
-    /**
-     * 要分配的最大数组大小
-     */
-    private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
-
-    /**
+	/**
      * ArrayList扩容的核心方法。
      */
     private void grow(int minCapacity) {
         // oldCapacity为旧容量，newCapacity为新容量
         int oldCapacity = elementData.length;
-        //将oldCapacity 右移一位，其效果相当于oldCapacity /2，
-        //我们知道位运算的速度远远快于整除运算，整句运算式的结果就是将新容量更新为旧容量的1.5倍，
+
         int newCapacity = oldCapacity + (oldCapacity >> 1);
         //然后检查新容量是否大于最小需要容量，若还是小于最小需要容量，那么就把最小需要容量当作数组的新容量，
         if (newCapacity - minCapacity < 0)
@@ -468,6 +462,81 @@ private void ensureExplicitCapacity(int minCapacity) {
         // minCapacity is usually close to size, so this is a win:
         elementData = Arrays.copyOf(elementData, newCapacity);
     }
+```
+
+> **核心逻辑：**
+>
+> * 默认扩容为原容量的 1.5 倍：`oldCapacity + (oldCapacity >> 1)`【运算的速度远远快于整除运算】
+> * 如果 1.5 倍还不够，就直接使用 `minCapacity`。
+> * 如果超过 `MAX_ARRAY_SIZE`（大约是 `Integer.MAX_VALUE - 8`），做安全处理。
+
+### 🌟 总结：一条完整扩容链路
+
+```scss
+ensureCapacityInternal(minCapacity)
+    └── calculateCapacity(elementData, minCapacity)
+            └── 返回实际需要容量（考虑默认初始容量 10）
+    └── ensureExplicitCapacity(minCapacity')
+            └── modCount++
+            └── 如果 minCapacity > 当前容量
+                    └── grow(minCapacity)
+                            └── 1.5 倍扩容 or minCapacity
+                            └── 拷贝新数组
+```
+
+#### 💬 一个示例理解
+
+```java
+ArrayList<Integer> list = new ArrayList<>();
+list.add(1);
+```
+
+流程：
+
+* 初始数组为空（DEFAULTCAPACITY_EMPTY_ELEMENTDATA）。
+* `minCapacity = size + 1 = 1`
+* `calculateCapacity()` 返回 `max(10, 1) = 10`
+* `ensureExplicitCapacity(10)`，初始分配容量 10（默认容量），完成。
+
+
+
+### 15、最大数组大小
+
+```java
+/**
+     * 要分配的最大数组大小
+     */
+    private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+```
+
+> 🌟 JVM 对数组对象的内存布局
+>
+> 在 JVM 中，数组对象不仅仅只存放数组元素，它还包括一些「对象头信息」，例如：
+>
+> * 对象的标记头（Mark Word）
+> * 类型指针（Klass Pointer）
+> * 数组长度字段
+>
+> 这些开销都会占用一定的内存，而不是算在数组元素里面。所以，即使你理论上想要 `Integer.MAX_VALUE` 长度的数组，**其实无法分配**，因为还要为这些头信息留出空间。
+>
+> 
+>
+> 🌟 为什么是「-8」？
+>
+> 这个 8 是一个 **经验值**，用于保守保证 JVM 在绝大多数实现里都能正常分配这个长度的数组，防止因为数组元数据导致 `OutOfMemoryError` 或者 `NegativeArraySizeException`。
+
+
+
+### 16、
+
+
+
+
+
+```java
+    
+
+    
 
     //比较minCapacity和 MAX_ARRAY_SIZE
     private static int hugeCapacity(int minCapacity) {
