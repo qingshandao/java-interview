@@ -978,22 +978,6 @@ E elementData(int index) {
 >
 > 
 >
-> **⚖️ 如果不使用泛型会怎样？**
->
-> ```java
-> ArrayList list = new ArrayList();
-> list.add("Apple");
-> list.add(100); // 合法，因为没有泛型限制
-> 
-> String s = (String) list.elementData(1); // ❌ ClassCastException
-> ```
->
-> - 因为第 1 个元素实际上是 Integer，强转 String 会在运行期报错。
->
-> - 这就是为什么推荐总是使用泛型的原因。
->
-> 
->
 > **🟠 为什么不会报错？**
 >
 > 当写 `ArrayList<String>` 时，编译器已经保证只有 `String` 类型能被放进 `elementData`，否则会报编译错误。
