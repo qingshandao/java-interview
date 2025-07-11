@@ -985,215 +985,773 @@ E elementData(int index) {
 
 
 
+### 27、返回指定位置元素
+
+根据索引返回指定位置的元素，类型为泛型 `E`。
+
 ```java
-    // Positional Access Operations
+public E get(int index) {
+    rangeCheck(index);
+    return elementData(index);
+}
+```
 
-    @SuppressWarnings("unchecked")
-    E elementData(int index) {
-        return (E) elementData[index];
+> 🟢 每一步详细解释
+>
+> ✅ `rangeCheck(index)`
+>
+> ```java
+> rangeCheck(index);
+> ```
+>
+> - 用于检查索引是否越界，保证安全性，防止访问数组越界，避免运行时错误。
+>
+> - 如果 `index` 不合法，会抛出 `IndexOutOfBoundsException`。
+>
+> ✅ `elementData(index)`
+>
+> ```java
+> return elementData(index);
+> ```
+>
+> - 内部调用 **私有方法** `elementData(int index)` 取出指定位置元素；
+>
+> - 这个方法本质就是从底层的 `elementData[]` 数组中取出元素，并用 `(E)` 强制转换回泛型类型；
+>
+> ✅ 返回值类型
+>
+> ```java
+> public E get(int index)
+> ```
+
+
+
+### 28、检查索引是否越界
+
+检查 index 是否越界（范围不包含size），如果越界则抛出异常；否则不做任何事，正常返回。
+
+```java
+private void rangeCheck(int index) {
+    if (index >= size)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+}
+```
+
+> - 检查条件：`index >= size`
+>
+> - 因为有效索引是 `0 ~ size - 1`
+>
+> - 注意这里并不检查负数，因为调用者一般不会传负数，如果传负数，后续会触发异常。
+>
+> 
+>
+> ❓ 为什么只检查上界？
+>
+> 因为 Java 的数组访问如果给负数会自动抛出 `ArrayIndexOutOfBoundsException`，不过这里在 ArrayList 中，如果有人传负数，其实也会触发异常（在 `elementData[index]` 时），并且后面 `outOfBoundsMsg(index)` 也会包含负数提示。
+>
+> 在这里主要是先自己主动抛出 `IndexOutOfBoundsException`，让异常信息更清晰、统一。
+
+
+
+### 29、修改指定位置元素
+
+将列表中指定位置的元素替换为新元素，并返回原来的元素。
+
+```java
+public E set(int index, E element) {
+    // 对索引进行界限检查，防止越界
+    rangeCheck(index);
+
+    E oldValue = elementData(index);
+    elementData[index] = element;
+    // 返回原来在这个位置的元素
+    return oldValue;
+}
+```
+
+
+
+### 30、添加元素
+
+向列表末尾添加一个新元素，自动扩容（如果需要），并返回 `true`。
+
+```java
+public boolean add(E e) {
+    ensureCapacityInternal(size + 1);  // Increments modCount!!
+    elementData[size++] = e;
+    return true;
+}
+```
+
+> ⚠`modCount` 在 `ensureExplicitCapacity()` 中执行
+
+
+
+### 31、指定位置插入新元素
+
+在列表中指定位置插入一个元素，原来的元素向后移动一位。
+
+```java
+public void add(int index, E element) {
+    rangeCheckForAdd(index);
+
+    ensureCapacityInternal(size + 1);  // Increments modCount!!
+
+    System.arraycopy(elementData, index, elementData, index + 1, size - index);
+
+    elementData[index] = element;
+    size++;
+}
+```
+
+> **🟢 每一步详细解释**
+>
+> ✅ 索引检查
+>
+> ```java
+> rangeCheckForAdd(index);
+> ```
+>
+> - 用于检查插入位置是否合法。
+>
+> - 和 `get()` 的 `rangeCheck()` 不一样， `rangeCheckForAdd()` 允许在 `size` 位置插入（即末尾相当于 append）。
+>
+> - 索引合法范围是：`0 <= index <= size`。
+>
+> ✅ 扩容检查
+>
+> ```java
+> ensureCapacityInternal(size + 1);
+> ```
+>
+> ✅ ⚡元素整体后移
+>
+> ```java
+> System.arraycopy(elementData, index, elementData, index + 1, size - index);
+> ```
+>
+> 这是核心逻辑！用 `System.arraycopy()` 把从 `index` 开始的所有元素，整体向后移动一位，给新元素腾位置。
+>
+> **参数解释**
+>
+> ```java
+> System.arraycopy(src, srcPos, dest, destPos, length);
+> ```
+>
+> - **src**：原数组（这里就是 `elementData`）
+>
+> - **srcPos**：要复制的起始位置
+>
+> - **dest**：目标数组（这里也是 `elementData`，相当于「自己复制自己」）
+>
+> - **destPos**：目标位置的起始位置
+>
+> - **length**：复制多少个元素
+>
+> 从 `index` 开始，复制 `size - index` 个元素，复制到 `index + 1` 开始，把后面的元素都往后移动一位。
+>
+> ⚠当 **目标区域在源区域后面** 且 **存在重叠** 时，`System.arraycopy()` 会自动从后往前复制，保证先把后面的值移好，不会被覆盖。
+>
+> ✅  插入新元素
+>
+> ```java
+> elementData[index] = element;
+> ```
+>
+> ✅ 更新 size
+>
+> ```java
+> size++;
+> ```
+
+
+
+### 32、检查插入元素的索引是否越界
+
+用于 **插入** 操作（add(index, element)）时检查 index 是否在合法范围内。
+
+```java
+private void rangeCheckForAdd(int index) {
+    if (index > size || index < 0)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+}
+```
+
+> **具体合法范围**
+>
+> * index 最小值：`0`
+> * index 最大值：`size`
+>
+> 
+>
+> ⚖️ 对比普通 `rangeCheck`
+>
+> | 方法               | 用途                             | 合法范围      |
+> | ------------------ | -------------------------------- | ------------- |
+> | `rangeCheck`       | 用于访问/修改元素（如 get, set） | `[0, size-1]` |
+> | `rangeCheckForAdd` | 用于插入新元素                   | `[0, size]`   |
+
+
+
+### 33、删除指定位置元素
+
+删除指定位置上的元素，后面的元素会向前移动一位，**容量不变**，返回被删除的元素。
+
+```java
+public E remove(int index) {
+    rangeCheck(index);
+
+    modCount++;
+    E oldValue = elementData(index);
+
+    int numMoved = size - index - 1;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index + 1, elementData, index,
+                numMoved);
+    elementData[--size] = null; // clear to let GC do its work
+
+    return oldValue;
+}
+```
+
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 索引检查
+>
+> ```java
+> rangeCheck(index);
+> ```
+>
+> - 确保 `index` 合法：`0 <= index < size`
+>
+> - 如果越界，抛出 `IndexOutOfBoundsException`
+>
+> ✅ 2️⃣ 修改计数器
+>
+> ```java
+> modCount++;
+> ```
+>
+> - 记录结构修改次数
+>
+> - 用于快速失败（fail-fast）机制，比如迭代器过程中检测到并发修改会报错
+>
+> ✅ 3️⃣ 保存旧值
+>
+> ```java
+> E oldValue = elementData(index);
+> ```
+>
+> 把要删除的元素先保存起来，方便后面返回。
+>
+> ✅ 4️⃣ 计算需要移动的元素个数
+>
+> ```java
+> int numMoved = size - index - 1;
+> ```
+>
+> 表示「删除位置后面需要向前移动的元素数量」
+>
+> ✅ 5️⃣ 执行向前移动
+>
+> ```java
+> if (numMoved > 0)
+>     System.arraycopy(elementData, index + 1, elementData, index, numMoved);
+> ```
+>
+> - 如果删除的是末尾元素，`numMoved` 就是 0，不需要移动
+>
+> - 否则，把 `index+1` 开始的所有元素向前移动一位，覆盖掉被删除元素
+>
+> ✅ 6️⃣ 清空最后一个位置
+>
+> ```java
+> elementData[--size] = null; // clear to let GC do its work
+> ```
+>
+> - 先执行 `--size`，size 减 1（删除后长度更新）
+>
+> - 把最后一个（之前重复留在最后的）元素置为 `null`
+>
+> - 方便垃圾回收（GC），否则引用会一直保留
+>
+> ✅ 7️⃣ 返回旧值
+>
+> ```java
+> return oldValue;
+> ```
+
+
+
+### 34、删除指定元素值
+
+删除列表中第一个与指定对象相等的元素（只删第一个），如果删除成功返回 `true`，否则返回 `false`。
+
+```java
+public boolean remove(Object o) {
+    if (o == null) {
+        for (int index = 0; index < size; index++)
+            if (elementData[index] == null) {
+                fastRemove(index);
+                return true;
+            }
+    } else {
+        for (int index = 0; index < size; index++)
+            if (o.equals(elementData[index])) {
+                fastRemove(index);
+                return true;
+            }
     }
+    return false;
+}
+```
 
-    /**
-     * 返回此列表中指定位置的元素。
-     */
-    public E get(int index) {
-        rangeCheck(index);
+> ✅ 1️⃣ 判断被删除元素是否为 null
+>
+> ```java
+> if (o == null) {
+>     ...
+> } else {
+>     ...
+> }
+> ```
+>
+> - `ArrayList` 支持存储 null，所以需要特别判断。
+>
+> - 如果 `o` 是 null，用 `== null` 判断。
+>
+> - 如果 `o` 不是 null，用 `equals()` 判断。
+>
+> ✅ 2️⃣ 遍历找第一个相等元素
+>
+> - 如果 `o == null`
+>
+> 	```java
+> 	for (int index = 0; index < size; index++)
+> 	    if (elementData[index] == null) {
+> 	        fastRemove(index);
+> 	        return true;
+> 	    }
+> 	```
+>
+> 	- 遍历整个列表，找第一个 `null` 元素。
+>
+> 	- 找到后，调用 `fastRemove(index)` 删除，并立即返回 `true`。
+>
+> - 如果 `o != null`
+>
+> 	```java
+> 	for (int index = 0; index < size; index++)
+> 	    if (o.equals(elementData[index])) {
+> 	        fastRemove(index);
+> 	        return true;
+> 	    }
+> 	```
+>
+> 	- 遍历找第一个 `equals()` 相等的元素。
+>
+> 	- 找到后，调用 `fastRemove(index)` 删除，并立即返回 `true`。
+>
+> ✅ 3️⃣ 没有找到
+>
+> ```java
+> return false;
+> ```
+>
+> 遍历结束都没找到，说明没有这个元素，返回 `false`。
 
-        return elementData(index);
-    }
+### 35、快速删除指定位置的元素【私有方法】
 
-    /**
-     * 用指定的元素替换此列表中指定位置的元素。
-     */
-    public E set(int index, E element) {
-        //对index进行界限检查
-        rangeCheck(index);
+在指定索引处快速移除元素，后面元素整体向前移动一位，不返回被删除的值。
 
-        E oldValue = elementData(index);
-        elementData[index] = element;
-        //返回原来在这个位置的元素
-        return oldValue;
-    }
+```java
+private void fastRemove(int index) {
+    modCount++;
+    int numMoved = size - index - 1;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index + 1, elementData, index,
+                numMoved);
+    elementData[--size] = null; // 在移除元素后，将该位置设为 null，方便 GC
+}
+```
 
-    /**
-     * 将指定的元素追加到此列表的末尾。
-     */
-    public boolean add(E e) {
-        ensureCapacityInternal(size + 1);  // Increments modCount!!
-        //这里看到ArrayList添加元素的实质就相当于为数组赋值
-        elementData[size++] = e;
-        return true;
-    }
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 修改结构性修改计数器
+>
+> ```java
+> modCount++;
+> ```
+>
+> ✅ 2️⃣ 计算要移动的元素数量
+>
+> ```java
+> int numMoved = size - index - 1;
+> ```
+>
+> 删除后需要把后面元素往前移
+>
+> ✅ 3️⃣ 元素向前移动
+>
+> ```java
+> if (numMoved > 0)
+>     System.arraycopy(elementData, index + 1, elementData, index, numMoved);
+> ```
+>
+> - 把 `index + 1` 开始的元素，向前覆盖到 `index` 位置
+>
+> - 相当于「把后面的元素往前挪一格」
+>
+> ✅ 4️⃣ 清理尾元素
+>
+> ```java
+> elementData[--size] = null;
+> ```
+>
+> * `--size`：先减小 size（因为已经少了一个元素）
+> * `elementData[size] = null`：清空最后一个多余元素，防止对象引用被遗留在数组中（帮助 GC 回收）
+>
+> 
+>
+> ❓ **为什么「快」？**
+>
+> - 不需要返回被删除元素（相比 `remove(int index)`，它需要先保存 oldValue）
+>
+> - 直接把后面的元素一次移动完成，不多余操作
+>
+> - 避免多层封装，直接修改数组，性能高
 
-    /**
-     * 在此列表中的指定位置插入指定的元素。
-     * 先调用 rangeCheckForAdd 对index进行界限检查；然后调用 ensureCapacityInternal 方法保证capacity足够大；
-     * 再将从index开始之后的所有成员后移一个位置；将element插入index位置；最后size加1。
-     */
-    public void add(int index, E element) {
-        rangeCheckForAdd(index);
 
-        ensureCapacityInternal(size + 1);  // Increments modCount!!
-        //arraycopy()这个实现数组之间复制的方法一定要看一下，下面就用到了arraycopy()方法实现数组自己复制自己
-        System.arraycopy(elementData, index, elementData, index + 1,
-                size - index);
-        elementData[index] = element;
-        size++;
-    }
 
-    /**
-     * 删除该列表中指定位置的元素。 将任何后续元素移动到左侧（从其索引中减去一个元素）。
-     */
-    public E remove(int index) {
-        rangeCheck(index);
+### 36、删除所有元素
 
-        modCount++;
-        E oldValue = elementData(index);
+清空列表中的所有元素，列表长度变为 0，**数组容量不变**。
 
-        int numMoved = size - index - 1;
-        if (numMoved > 0)
-            System.arraycopy(elementData, index + 1, elementData, index,
-                    numMoved);
-        elementData[--size] = null; // clear to let GC do its work
-        //从列表中删除的元素
-        return oldValue;
-    }
+```java
+public void clear() {
+    modCount++;
 
-    /**
-     * 从列表中删除指定元素的第一个出现（如果存在）。 如果列表不包含该元素，则它不会更改。
-     * 返回true，如果此列表包含指定的元素
-     */
-    public boolean remove(Object o) {
-        if (o == null) {
-            for (int index = 0; index < size; index++)
-                if (elementData[index] == null) {
-                    fastRemove(index);
-                    return true;
-                }
-        } else {
-            for (int index = 0; index < size; index++)
-                if (o.equals(elementData[index])) {
-                    fastRemove(index);
-                    return true;
-                }
-        }
-        return false;
-    }
+    // 把数组中所有的元素设为 null
+    for (int i = 0; i < size; i++)
+        elementData[i] = null;
 
-    /*
-     * 该方法为私有的移除方法，跳过了边界检查，并且不返回被移除的值。
-     */
-    private void fastRemove(int index) {
-        modCount++;
-        int numMoved = size - index - 1;
-        if (numMoved > 0)
-            System.arraycopy(elementData, index + 1, elementData, index,
-                    numMoved);
-        elementData[--size] = null; // 在移除元素后，将该位置的元素设为 null，以便垃圾回收器（GC）能够回收该元素。
-    }
+    size = 0;
+}
+```
 
-    /**
-     * 从列表中删除所有元素。
-     */
-    public void clear() {
-        modCount++;
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 修改结构性修改计数器
+>
+> ```java
+> modCount++;
+> ```
+>
+> ✅ 2️⃣ 清空数组中的对象引用
+>
+> ```java
+> for (int i = 0; i < size; i++)
+>     elementData[i] = null;
+> ```
+>
+> - 将 `elementData` 数组中前 `size` 个元素全部置为 `null`
+>
+> - 这样做的原因：
+> 	- 解除对对象的引用，帮助垃圾回收（GC）
+> 	- 如果不清空，数组中还保留原来的引用，即使逻辑上删除，内存不会被及时释放
+>
+> ✅ 3️⃣ 重置 size
+>
+> ```java
+> size = 0;
+> ```
+>
+> - 将列表的实际元素数量设置为 0
+>
+> - 下次调用 `add()` 会从索引 0 开始写入
+>
+> 
+>
+> ⚠ 注意：**容量不变**
+>
+> - `clear()` 不会修改数组容量（`elementData.length` 不变）
+>
+> - 只清理内容，不收缩底层数组
+>
+> 
+>
+> **⚖️ 如果需要收缩？**
+>
+> 可以手动调用：`list.trimToSize()`，它会把容量缩小到当前 `size`，即 0。
 
-        // 把数组中所有的元素的值设为null
-        for (int i = 0; i < size; i++)
-            elementData[i] = null;
 
-        size = 0;
-    }
 
-    /**
-     * 按指定集合的Iterator返回的顺序将指定集合中的所有元素追加到此列表的末尾。
-     */
-    public boolean addAll(Collection<? extends E> c) {
-        Object[] a = c.toArray();
-        int numNew = a.length;
-        ensureCapacityInternal(size + numNew);  // Increments modCount
-        System.arraycopy(a, 0, elementData, size, numNew);
-        size += numNew;
-        return numNew != 0;
-    }
+### 37、添加所有集合中的元素
 
-    /**
-     * 将指定集合中的所有元素插入到此列表中，从指定的位置开始。
-     */
-    public boolean addAll(int index, Collection<? extends E> c) {
-        rangeCheckForAdd(index);
+将传入集合 `c` 中的所有元素批量添加到当前 `ArrayList` 的末尾，**按顺序**插入。
 
-        Object[] a = c.toArray();
-        int numNew = a.length;
-        ensureCapacityInternal(size + numNew);  // Increments modCount
+```java
+public boolean addAll(Collection<? extends E> c) {
+    Object[] a = c.toArray();
+    int numNew = a.length;
+    ensureCapacityInternal(size + numNew);  // Increments modCount
+    System.arraycopy(a, 0, elementData, size, numNew);
+    size += numNew;
+    return numNew != 0;
+}
+```
 
-        int numMoved = size - index;
-        if (numMoved > 0)
-            System.arraycopy(elementData, index, elementData, index + numNew,
-                    numMoved);
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 把集合转换成数组
+>
+> ```java
+> Object[] a = c.toArray();
+> ```
+>
+> - 调用 `Collection` 的 `toArray()` 方法
+>
+> - 把集合 `c` 的所有元素复制到一个新的数组 `a`
+>
+> - 数组 `a` 中存放的就是将要批量添加的元素
+>
+> ✅ 2️⃣ 计算新元素的个数
+>
+> ```java
+> int numNew = a.length;
+> ```
+>
+> 新数组的长度就是需要添加的元素数量
+>
+> ✅ 3️⃣ 确保容量足够
+>
+> ```java
+> ensureCapacityInternal(size + numNew);  // Increments modCount
+> ```
+>
+> - 确保当前内部数组 `elementData` 能容纳「原有元素数量 + 新元素数量」
+>
+> - 如果不够，就扩容（通常会按照 1.5 倍策略扩）
+>
+> - 内部会自动增加 `modCount`
+>
+> ✅ 4️⃣ 批量复制新元素
+>
+> ```java
+> System.arraycopy(a, 0, elementData, size, numNew);
+> ```
+>
+> - 把新数组 `a` 从索引 0 开始，复制到当前 `elementData` 的 `size` 位置开始
+>
+> - 实现「批量追加」效果
+>
+> - `System.arraycopy()` 内部是 native 方法，性能非常高
+>
+> ✅ 5️⃣ 更新 size
+>
+> ```java
+> size += numNew;
+> ```
+>
+> ✅ 6️⃣ 返回是否有元素添加
+>
+> ```java
+> return numNew != 0;
+> ```
 
-        System.arraycopy(a, 0, elementData, index, numNew);
-        size += numNew;
-        return numNew != 0;
-    }
 
-    /**
-     * 从此列表中删除所有索引为fromIndex （含）和toIndex之间的元素。
-     * 将任何后续元素移动到左侧（减少其索引）。
-     */
-    protected void removeRange(int fromIndex, int toIndex) {
-        modCount++;
-        int numMoved = size - toIndex;
-        System.arraycopy(elementData, toIndex, elementData, fromIndex,
+
+### 38、从指定位置添加集合中的元素
+
+在指定索引 `index` 处插入一个集合 `c` 的所有元素，原有元素自动往后移，顺序保持一致。
+
+```java
+public boolean addAll(int index, Collection<? extends E> c) {
+    rangeCheckForAdd(index);
+
+    Object[] a = c.toArray();
+    int numNew = a.length;
+    ensureCapacityInternal(size + numNew);  // Increments modCount
+
+    int numMoved = size - index;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index, elementData, index + numNew,
                 numMoved);
 
-        // clear to let GC do its work
-        int newSize = size - (toIndex - fromIndex);
-        for (int i = newSize; i < size; i++) {
-            elementData[i] = null;
-        }
-        size = newSize;
-    }
+    System.arraycopy(a, 0, elementData, index, numNew);
+    size += numNew;
+    return numNew != 0;
+}
+```
 
-    /**
-     * 检查给定的索引是否在范围内。
-     */
-    private void rangeCheck(int index) {
-        if (index >= size)
-            throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
-    }
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 索引检查
+>
+> ```java
+> rangeCheckForAdd(index);
+> ```
+>
+> - 确认索引合法：`0 <= index <= size`
+>
+> - 可以在末尾插入（index = size）
+>
+> ✅ 2️⃣ 转换集合为数组
+>
+> ```java
+> Object[] a = c.toArray();
+> int numNew = a.length;
+> ```
+>
+> - 将集合 `c` 转换成数组 `a`
+>
+> - 获取新元素的数量 `numNew`
+>
+> ✅ 3️⃣ 确保容量足够
+>
+> ```java
+> ensureCapacityInternal(size + numNew);
+> ```
+>
+> ✅ 4️⃣ 计算需要移动的元素数
+>
+> ```java
+> int numMoved = size - index;
+> ```
+>
+> ✅ 5️⃣ 移动原有元素
+>
+> ```java
+> if (numMoved > 0)
+>     System.arraycopy(elementData, index, elementData, index + numNew, numMoved);
+> ```
+>
+> ✅ 6️⃣ 复制新元素
+>
+> ```java
+> System.arraycopy(a, 0, elementData, index, numNew);
+> ```
+>
+> ✅ 7️⃣ 更新 size
+>
+> ```java
+> size += numNew;
+> ```
+>
+> ✅ 8️⃣ 返回值
+>
+> ```java
+> return numNew != 0;
+> ```
 
-    /**
-     * add和addAll使用的rangeCheck的一个版本
-     */
-    private void rangeCheckForAdd(int index) {
-        if (index > size || index < 0)
-            throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
-    }
 
+
+### 39、删除指定范围内的元素
+
+删除从索引 `fromIndex`（**含**）到 `toIndex`（**不含**）的所有元素，后续元素前移，更新 size，清理冗余元素引用，支持 GC。
+
+```java
+protected void removeRange(int fromIndex, int toIndex) {
+    modCount++;
+    int numMoved = size - toIndex;
+    System.arraycopy(elementData, toIndex, elementData, fromIndex, numMoved);
+
+    // clear to let GC do its work
+    int newSize = size - (toIndex - fromIndex);
+    for (int i = newSize; i < size; i++) {
+        elementData[i] = null;
+    }
+    size = newSize;
+}
+```
+
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 修改结构性修改计数器
+>
+> ```java
+> modCount++;
+> ```
+>
+> ✅ 2️⃣ 计算需要移动的元素数量
+>
+> ```java
+> int numMoved = size - toIndex;
+> ```
+>
+> * 表示从 `toIndex` 开始到末尾的元素数量
+> * 这些元素要向前移动到 `fromIndex` 位置
+>
+> ✅ 3️⃣ 元素前移
+>
+> ```java
+> System.arraycopy(elementData, toIndex, elementData, fromIndex, numMoved);
+> ```
+>
+> - 把 `toIndex` 开始的所有元素整体向前挪到 `fromIndex` 开始的位置
+>
+> - 等效于「覆盖要删除的区间」
+>
+> ✅ 4️⃣ 计算新 size
+>
+> ```java
+> int newSize = size - (toIndex - fromIndex);
+> ```
+>
+> ✅ 5️⃣ 清理尾部多余引用
+>
+> ```java
+> for (int i = newSize; i < size; i++) {
+>     elementData[i] = null;
+> }
+> ```
+>
+> - 之前删除后，数组后面会遗留旧的元素引用
+>
+> - 将它们置为 null，防止内存泄露，方便 GC 回收
+>
+> ✅ 6️⃣ 更新 size
+>
+> ```java
+> size = newSize;
+> ```
+
+
+
+### 40、删除指定集合中存在的元素
+
+从当前 `ArrayList` 中移除所有在集合 `c` 中存在的元素。返回值表示是否实际删除了任何元素。
+
+```java
+public boolean removeAll(Collection<?> c) {
+    Objects.requireNonNull(c);	// 如果集合 c 是 null，抛出 NullPointerException
+    return batchRemove(c, false);
+}
+```
+
+
+
+### 41、仅保留指定集合中存在的元素
+
+只保留当前 `ArrayList` 中也包含在集合 `c` 里的元素，删除其他所有元素。
+
+```java
+public boolean retainAll(Collection<?> c) {
+    Objects.requireNonNull(c);	// 如果集合 c 是 null，抛出 NullPointerException
+    return batchRemove(c, true);
+}
+```
+
+
+
+### 43、
+
+```java
     /**
      * 返回IndexOutOfBoundsException细节信息
      */
     private String outOfBoundsMsg(int index) {
         return "Index: " + index + ", Size: " + size;
-    }
-
-    /**
-     * 从此列表中删除指定集合中包含的所有元素。
-     */
-    public boolean removeAll(Collection<?> c) {
-        Objects.requireNonNull(c);
-        //如果此列表被修改则返回true
-        return batchRemove(c, false);
-    }
-
-    /**
-     * 仅保留此列表中包含在指定集合中的元素。
-     * 换句话说，从此列表中删除其中不包含在指定集合中的所有元素。
-     */
-    public boolean retainAll(Collection<?> c) {
-        Objects.requireNonNull(c);
-        return batchRemove(c, true);
     }
 
 
