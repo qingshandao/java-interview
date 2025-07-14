@@ -1744,42 +1744,591 @@ public boolean retainAll(Collection<?> c) {
 
 
 
-### 43、
+### 42、批量删除/保留元素
+
+**💡 场景**
+
+* 真正进行批量删除/保留元素的核心逻辑
+* 可以处理整个列表，也可以处理一个子范围
 
 ```java
-    /**
-     * 返回IndexOutOfBoundsException细节信息
-     */
-    private String outOfBoundsMsg(int index) {
-        return "Index: " + index + ", Size: " + size;
+boolean batchRemove(Collection<?> c, boolean complement, final int from, final int end) {
+    Objects.requireNonNull(c);
+    final Object[] es = elementData;
+    int r;
+    // Optimize for initial run of survivors
+    for (r = from;; r++) {
+        if (r == end)
+            return false;
+        if (c.contains(es[r]) != complement)
+            break;
     }
-
-
-    /**
-     * 从列表中的指定位置开始，返回列表中的元素（按正确顺序）的列表迭代器。
-     * 指定的索引表示初始调用将返回的第一个元素为next 。 初始调用previous将返回指定索引减1的元素。
-     * 返回的列表迭代器是fail-fast 。
-     */
-    public ListIterator<E> listIterator(int index) {
-        if (index < 0 || index > size)
-            throw new IndexOutOfBoundsException("Index: " + index);
-        return new ListItr(index);
+    int w = r++;
+    try {
+        for (Object e; r < end; r++)
+            if (c.contains(e = es[r]) == complement)
+                es[w++] = e;
+    } catch (Throwable ex) {
+        System.arraycopy(es, r, es, w, end - r);
+        w += end - r;
+        throw ex;
+    } finally {
+        modCount += end - w;
+        shiftTailOverGap(es, w, end);
     }
+    return true;
+}
 
-    /**
-     * 返回列表中的列表迭代器（按适当的顺序）。
-     * 返回的列表迭代器是fail-fast 。
-     */
-    public ListIterator<E> listIterator() {
-        return new ListItr(0);
-    }
-
-    /**
-     * 以正确的顺序返回该列表中的元素的迭代器。
-     * 返回的迭代器是fail-fast 。
-     */
-    public Iterator<E> iterator() {
-        return new Itr();
-    }
 ```
+
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 判空
+>
+> ```java
+> Objects.requireNonNull(c);
+> ```
+>
+> 集合 `c` 不允许为 null，否则抛出异常
+>
+> ✅ 2️⃣ 初始化引用
+>
+> ```java
+> final Object[] es = elementData;
+> ```
+>
+> 引用内部数组，方便写法
+>
+> ✅ 3️⃣ 找第一个需要保留的元素（优化前置）
+>
+> ```java
+> for (r = from;; r++) {
+>     if (r == end)
+>         return false;
+>     if (c.contains(es[r]) != complement)
+>         break;
+> }
+> 
+> ```
+>
+> > 🌟 判断逻辑
+> >
+> > ```java
+> > if (c.contains(es[r]) != complement)
+> > ```
+> >
+> > * 当 `complement = false`（removeAll）：
+> > 	* 条件为 `c.contains(es[r]) != false` → `c.contains(es[r]) == true`，需要删除 → 不保留 → break
+> > * 当 `complement = true`（retainAll）：
+> > 	* 条件为 `c.contains(es[r]) != true` → `c.contains(es[r]) == false`，需要删除 → 不保留 → break
+> >
+> > 这里的作用：找到第一个要移动/保留的元素，提前结束前面连续不需要移动的情况，优化性能
+> >
+> > | complement | 方法      | 条件           | 当条件成立（true）时表示           |
+> > | ---------- | --------- | -------------- | ---------------------------------- |
+> > | true       | retainAll | !c.contains(e) | 当前元素不在 c，需要删除（不保留） |
+> > | false      | removeAll | c.contains(e)  | 当前元素在 c，需要删除（不保留）   |
+>
+> ✅ 4️⃣ 初始化写指针
+>
+> ```java
+> int w = r++;
+> ```
+>
+> - `w` 表示下一个要写入的位置
+>
+> - 初始等于第一个保留元素的位置
+>
+> - `r++` 表示从下一个元素开始继续读
+>
+> ✅ 5️⃣ 主遍历循环（try 块）
+>
+> ```java
+> try {
+>     for (Object e; r < end; r++)
+>         if (c.contains(e = es[r]) == complement)
+>             es[w++] = e;
+> }
+> ```
+>
+> > #### 🌟 判断逻辑
+> >
+> > * 当需要保留时，将元素写到位置 `w`
+> > * 写完 `w++`
+> >
+> > #### ⚡ 双指针法
+> >
+> > * `r` = 读指针，扫描所有元素
+> > * `w` = 写指针，只写需要保留的
+>
+> ✅ 6️⃣ catch 块（异常兼容处理）
+>
+> ```java
+> catch (Throwable ex) {
+>     System.arraycopy(es, r, es, w, end - r);
+>     w += end - r;
+>     throw ex;
+> }
+> ```
+>
+> - 如果 `c.contains()` 方法在遍历中抛出异常（比如用户自定义集合 contains 抛异常）
+>
+> - 会将后面未遍历的元素整体复制回去，恢复列表的一致性
+>
+> - 确保异常抛出时，列表处于一个正确的状态
+>
+> ✅ 7️⃣ finally 块（最后清理）
+>
+> ```java
+> finally {
+>     modCount += end - w;
+>     shiftTailOverGap(es, w, end);
+> }
+> ```
+>
+> **modCount 更新**
+>
+> * 修改统计，表示有多少元素被删除
+>
+> **调用 `shiftTailOverGap`**
+>
+> * 把后面尾巴元素向前移动
+> * 清空末尾冗余引用，防止内存泄漏
+>
+> ✅ 8️⃣ 返回
+>
+> ```java
+> return true;
+> ```
+>
+> 删除或保留操作已完成，返回 true
+>
+> 
+
+
+
+### 43、生成越界信息
+
+用来生成「索引越界」时抛出异常的详细错误信息字符串。
+
+```java
+private String outOfBoundsMsg(int index) {
+    return "Index: " + index + ", Size: " + size;
+}
+
+```
+
+在 `ArrayList` 的很多方法中（比如 `get(int index)`、`set(int index, E element)`、`remove(int index)` 等），如果访问的 `index` 超过了当前合法范围，就会调用 `rangeCheck()`，而 `rangeCheck()` 又会调用这个方法来生成错误提示信息。
+
+
+
+### 44、从指定位置返回双向迭代器
+
+返回一个从指定位置 **index** 开始的 `ListIterator` 对象，用于双向遍历 `ArrayList`。
+
+⚡ 与 `iterator()` 方法相比，`ListIterator` 功能更强大，支持向前、向后遍历，还支持添加、修改、删除等操作，支持`fail-fast`。
+
+```java
+public ListIterator<E> listIterator(int index) {
+    if (index < 0 || index > size)
+        throw new IndexOutOfBoundsException("Index: " + index);
+    return new ListItr(index);
+}
+```
+
+> **🟢 每一步详细解释**
+>
+> ✅ 1️⃣ 边界检查
+>
+> ```java
+> if (index < 0 || index > size)
+>     throw new IndexOutOfBoundsException("Index: " + index);
+> ```
+>
+> - 确保 index 在合法范围内
+>
+> - 注意这里 **允许 `index == size`**，这是因为在迭代器的语义中，末尾也可以作为一个合法的「起点」
+>
+> ✅ 2️⃣ 返回 ListItr 对象
+>
+> ```java
+> return new ListItr(index);
+> ```
+>
+> - `ListItr` 是 `ArrayList` 内部定义的一个私有类，继承自 `Itr`（普通迭代器）
+>
+> - 它实现了 `ListIterator<E>` 接口，提供比普通迭代器更丰富的功能，包括：
+> 	- `hasPrevious()`
+> 	- `previous()`
+> 	- `nextIndex()`
+> 	- `previousIndex()`
+> 	- `set(E e)`
+> 	- `add(E e)`
+>
+> 
+>
+> **🌟 内部 ListItr 简介（核心思路）**
+>
+> ```java
+> private class ListItr extends Itr implements ListIterator<E> {
+>     ListItr(int index) {
+>         cursor = index; // 设置起始位置
+>     }
+> 
+>     public boolean hasPrevious() { ... }
+>     public E previous() { ... }
+>     public int nextIndex() { return cursor; }
+>     public int previousIndex() { return cursor - 1; }
+>     public void set(E e) { ... }
+>     public void add(E e) { ... }
+> }
+> ```
+>
+> * `cursor` ：表示当前游标（当前迭代位置）
+> * `index` 构造时就设置 cursor
+> * 因此从 `index` 处开始遍历
+
+
+
+### 45、返回从头开始的双向迭代器
+
+返回一个 **从列表头部开始** 的 `ListIterator` 对象（支持 `fail-fast`），用来遍历 `ArrayList`。
+
+```java
+public ListIterator<E> listIterator() {
+    return new ListItr(0);
+}
+```
+
+
+
+### 46、返回单向迭代器
+
+返回一个 **只能单向遍历** 的 `Iterator`（迭代器），用于遍历 `ArrayList` 中的元素，支持`fail-fast`。
+
+```java
+public Iterator<E> iterator() {
+    return new Itr();
+}
+```
+
+> **🔥 和 ListIterator 的区别**
+>
+> | 功能     | Iterator | ListIterator |
+> | -------- | -------- | ------------ |
+> | 单向遍历 | ✅        | ✅            |
+> | 双向遍历 | ❌        | ✅            |
+> | 添加元素 | ❌        | ✅            |
+> | 设置元素 | ❌        | ✅            |
+> | 查询索引 | ❌        | ✅            |
+
+
+
+### 47、内部类—— `Itr`
+
+`Itr` 是一个只支持向前遍历并删除的简单迭代器
+
+```java
+private class Itr implements Iterator<E> {
+    int cursor;       // 下一个要返回的元素索引
+    int lastRet = -1; // 上一次返回元素的索引，如果没有则为 -1
+    int expectedModCount = modCount; // 快照，用于 fail-fast 检测
+
+    public boolean hasNext() {
+        return cursor != size;
+    }
+
+    @SuppressWarnings("unchecked")
+    public E next() {
+        checkForComodification();
+        int i = cursor;
+        if (i >= size)
+            throw new NoSuchElementException();
+        Object[] elementData = ArrayList.this.elementData;
+        if (i >= elementData.length)
+            throw new ConcurrentModificationException();
+        cursor = i + 1;
+        lastRet = i;
+        return (E) elementData[lastRet];
+    }
+
+    public void remove() {
+        if (lastRet < 0)
+            throw new IllegalStateException();
+        checkForComodification();
+
+        try {
+            ArrayList.this.remove(lastRet);
+            cursor = lastRet; // 因为 remove 后，后面的元素左移了
+            lastRet = -1;
+            expectedModCount = modCount;
+        } catch (IndexOutOfBoundsException ex) {
+            throw new ConcurrentModificationException();
+        }
+    }
+
+    final void checkForComodification() {
+        if (modCount != expectedModCount)
+            throw new ConcurrentModificationException();
+    }
+}
+
+```
+
+#### 🟢 类属性
+
+✅ cursor
+
+* 当前「游标」位置，表示**下一个要返回的元素索引**。
+* 初始化为 0。
+
+------
+
+✅ lastRet
+
+* 最近一次调用 `next()` 或 `previous()` 返回的元素索引。
+* 没有返回过任何元素时为 -1。
+
+------
+
+✅ expectedModCount
+
+* 初始化为 `modCount` 的快照。
+* 用来检测**并发修改**（fail-fast 特性）：遍历时如果集合结构被外部修改（比如增删），会导致 `modCount != expectedModCount`，抛 `ConcurrentModificationException`。
+
+#### 🟢 方法解析
+
+✅ hasNext()
+
+```java
+return cursor != size;
+```
+
+判断当前游标是否还未到末尾。
+
+✅ next()
+
+```java
+checkForComodification();
+int i = cursor;
+if (i >= size)
+    throw new NoSuchElementException();
+...
+cursor = i + 1;
+lastRet = i;
+```
+
+- 校验并发修改。
+
+- 检查是否超出范围（没有下一个元素会抛出 `NoSuchElementException`）。
+
+- 返回当前 cursor 对应的元素，并将 cursor 向后移动。
+
+✅ remove()
+
+* 如果 `lastRet < 0`，说明没有调用过 `next()` 或已经被移除，抛出 `IllegalStateException`；
+* 调用 `ArrayList.this.remove(lastRet)` 实际移除元素；
+* 更新 cursor 与 expectedModCount；
+* ⚠仅支持删除最近返回元素
+
+✅ checkForComodification()
+
+* 确认 `modCount` 没被其他外部修改过。
+* 如果被修改，抛 `ConcurrentModificationException`。
+
+
+
+### 48、内部类—— `ListItr`
+
+相比 Itr，ListItr 实现了 `ListIterator<E>` 接口，提供更多双向操作功能。
+
+`ListItr` 是功能更全的双向迭代器，支持向前向后移动、添加、修改等高级操作，内部都带有 fail-fast 并发修改检测机制。
+
+```java
+private class ListItr extends Itr implements ListIterator<E> {
+    ListItr(int index) {
+        super();
+        cursor = index;
+    }
+
+    public boolean hasPrevious() {
+        return cursor != 0;
+    }
+
+    public int nextIndex() {
+        return cursor;
+    }
+
+    public int previousIndex() {
+        return cursor - 1;
+    }
+
+    @SuppressWarnings("unchecked")
+    public E previous() {
+        checkForComodification();
+        int i = cursor - 1;
+        if (i < 0)
+            throw new NoSuchElementException();
+        Object[] elementData = ArrayList.this.elementData;
+        if (i >= elementData.length)
+            throw new ConcurrentModificationException();
+        cursor = i;
+        lastRet = i;
+        return (E) elementData[lastRet];
+    }
+
+    public void set(E e) {
+        if (lastRet < 0)
+            throw new IllegalStateException();
+        checkForComodification();
+
+        try {
+            ArrayList.this.set(lastRet, e);
+        } catch (IndexOutOfBoundsException ex) {
+            throw new ConcurrentModificationException();
+        }
+    }
+
+    public void add(E e) {
+        checkForComodification();
+
+        try {
+            int i = cursor;
+            ArrayList.this.add(i, e);
+            cursor = i + 1;
+            lastRet = -1;
+            expectedModCount = modCount;
+        } catch (IndexOutOfBoundsException ex) {
+            throw new ConcurrentModificationException();
+        }
+    }
+}
+```
+
+#### 🟢 新增的能力
+
+✅ hasPrevious()
+
+* 判断当前游标是否前面还有元素（即游标不在 0 时）。
+
+✅ nextIndex() / previousIndex()
+
+* 返回下一个元素的索引 / 上一个元素的索引。
+
+✅ previous()
+
+```java
+int i = cursor - 1;
+if (i < 0)
+    throw new NoSuchElementException();
+...
+cursor = i;
+lastRet = i;
+```
+
+* 返回游标左侧的元素，并把游标向左移动。
+* 支持向后遍历。
+
+✅ set(E e)
+
+* 替换最近一次 `next()` 或 `previous()` 返回的元素值。
+* 必须先调用过 `next()` 或 `previous()`。
+
+✅ add(E e)
+
+* 在游标当前指向的位置插入一个新元素。
+* 插入后，cursor 会往后移，lastRet 置为 -1。
+
+#### 🟢 构造函数
+
+```java
+ListItr(int index) {
+    super();
+    cursor = index;
+}
+```
+
+- 支持传入 index，从任意索引开始遍历。
+
+#### 🟢 总结 ListItr
+
+| 功能     | 描述                                  |
+| -------- | ------------------------------------- |
+| 双向遍历 | 支持 `previous()` 向后移动            |
+| set      | 替换最近返回元素                      |
+| add      | 在当前 cursor 位置插入元素            |
+| 定位索引 | 提供 `nextIndex()`、`previousIndex()` |
+
+#### 💡 总体对比总结
+
+| 特性     | `Itr`                    | `ListItr`                |
+| -------- | ------------------------ | ------------------------ |
+| 单向遍历 | ✅                        | ✅                        |
+| 双向遍历 | ❌                        | ✅                        |
+| 删除     | ✅（仅删除 lastRet 元素） | ✅（仅删除 lastRet 元素） |
+| 修改元素 | ❌                        | ✅ (`set()`)              |
+| 添加元素 | ❌                        | ✅ (`add()`)              |
+| 支持索引 | ❌                        | ✅ (`nextIndex()` 等)     |
+
+
+
+## 1.5、ArrayList 扩容机制分析
+
+### 1️⃣ 先从 ArrayList 的构造函数说起
+
+ArrayList 有三种方式来初始化，构造方法源码如下（JDK8）：
+
+```java
+/**
+ * 默认初始容量大小
+ */
+private static final int DEFAULT_CAPACITY = 10;
+
+private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
+
+/**
+ * 默认构造函数，使用初始容量10构造一个空列表(无参数构造)
+ */
+public ArrayList() {
+    this.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;
+}
+
+/**
+ * 带初始容量参数的构造函数。（用户自己指定容量）
+ */
+public ArrayList(int initialCapacity) {
+    if (initialCapacity > 0) {//初始容量大于0
+        //创建initialCapacity大小的数组
+        this.elementData = new Object[initialCapacity];
+    } else if (initialCapacity == 0) {//初始容量等于0
+        //创建空数组
+        this.elementData = EMPTY_ELEMENTDATA;
+    } else {//初始容量小于0，抛出异常
+        throw new IllegalArgumentException("Illegal Capacity: " + initialCapacity);
+    }
+}
+
+
+/**
+ *构造包含指定collection元素的列表，这些元素利用该集合的迭代器按顺序返回
+ *如果指定的集合为null，throws NullPointerException。
+ */
+public ArrayList(Collection<? extends E> c) {
+    elementData = c.toArray();
+    if ((size = elementData.length) != 0) {
+        // c.toArray might (incorrectly) not return Object[] (see 6260652)
+        if (elementData.getClass() != Object[].class)
+            elementData = Arrays.copyOf(elementData, size, Object[].class);
+    } else {
+        // replace with empty array.
+        this.elementData = EMPTY_ELEMENTDATA;
+    }
+}
+```
+
+**以无参数构造方法创建 `ArrayList` 时，实际上初始化赋值的是一个空数组。当真正对数组进行添加元素操作时，才真正分配容量。即向数组中添加第一个元素时，数组容量扩为 10。** 下面分析 `ArrayList` 扩容时会讲到这一点内容！
+
+> 补充：JDK6 new 无参构造的 `ArrayList` 对象时，直接创建了长度是 10 的 `Object[]` 数组 `elementData` 。
+
+### 2️⃣ 一步一步分析 ArrayList 扩容机制
 
