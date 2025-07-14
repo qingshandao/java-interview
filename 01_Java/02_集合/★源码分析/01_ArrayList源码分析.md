@@ -2332,3 +2332,4 @@ public ArrayList(Collection<? extends E> c) {
 
 ### 2️⃣ 一步一步分析 ArrayList 扩容机制
 
+这里以无参构造函数创建的 `ArrayList` 为例分析。
