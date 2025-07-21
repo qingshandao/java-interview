@@ -57,5 +57,70 @@ static int hash(int h) {
 
 相比于之前的版本，JDK1.8 以后在解决哈希冲突时有了较大的变化。
 
-当链表长度大于阈值（默认为 8）时，会首先调用 `treeifyBin()`方法。这个方法会根据 HashMap 数组来决定是否转换为红黑树。只有当数组长度大于或者等于 64 的情况下，才会执行转换红黑树操作，以减少搜索时间。否则，就是只是执行 `resize()` 方法对数组扩容。相关源码这里就不贴了，重点关注 `treeifyBin()`方法即可！
+当链表长度大于阈值（默认为 8）时，会首先调用 `treeifyBin()`方法。这个方法会根据 HashMap 数组长度，来决定是否将链表转换为红黑树。只有当数组长度大于或者等于 64 的情况下，才会执行转换红黑树操作，以减少搜索时间。否则，就是只是执行 `resize()` 方法对数组扩容，重点关注 `treeifyBin()`方法即可！
+
+![](../assets/jdk1.8_hashmap.png)
+
+### 2.1、何时调用 `treeifyBin()`？
+
+在 `HashMap` 中插入元素时，如果某个桶（bucket）中的**链表长度 >= 8**（这个值由常量 `TREEIFY_THRESHOLD = 8` 决定），会尝试调用 `treeifyBin()`：
+
+```java
+if (binCount >= TREEIFY_THRESHOLD - 1) // -1 是因为插入前计数
+    treeifyBin(tab, hash);
+```
+
+但并不是链表长度达到 8 就一定转换为红黑树，还要满足以下条件：
+
+**❗ 转树的前提：数组容量必须 ≥ 64**
+
+这是为了避免在小容量时频繁进行树形转换。
+
+```java
+static final int MIN_TREEIFY_CAPACITY = 64;
+```
+
+**如果当前数组容量 < 64，则不会转树，而是优先进行数组扩容（resize）**。
+
+### 2.2、`treeifyBin()` 如何转树？
+
+当满足条件时，`treeifyBin()` 方法将执行以下步骤：
+
+1. **定位桶位（bucket）**
+
+	通过 hash 计算索引，获取到对应数组位置上的链表头节点。
+
+2. **遍历链表，构造红黑树节点**
+
+	使用 `TreeNode`（继承自 `Node`）来替代原先的 `Node`，将链表中的每个元素封装为 `TreeNode` 节点，并插入红黑树中。
+
+	```java
+	TreeNode<K,V> hd = null, tl = null;
+	for (Node<K,V> e = first; e != null; e = e.next) {
+	    TreeNode<K,V> p = new TreeNode<>(...);
+	    if ((p.prev = tl) == null)
+	        hd = p;
+	    else
+	        tl.next = p;
+	    tl = p;
+	}
+	```
+
+	然后通过 `treeify` 方法将这个链表形式的 `TreeNode` 转换为红黑树结构。
+
+3. 替换原桶
+
+	原数组中该位置原先存的是链表头，现在会被替换为红黑树的根节点（`TreeNode` 类型）。
+
+### 2.3、如果后续冲突继续增加呢？
+
+新增元素仍会通过红黑树进行插入操作，维护红黑树的结构。
+
+### 2.4、反向：红黑树何时退回链表？
+
+在删除元素时，如果红黑树节点数 < 6（常量 `UNTREEIFY_THRESHOLD`），则会将该桶的红黑树退化为链表。
+
+### 2.5、重要源码
+
+#### 2.5.1、**类的属性：**
 
