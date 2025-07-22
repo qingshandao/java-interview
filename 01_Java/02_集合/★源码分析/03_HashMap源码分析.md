@@ -692,3 +692,32 @@ public class HashMapDemo {
 }
 ```
 
+输出结果：
+
+```java
+-------直接输出hashmap:-------
+{san=张三, wang=老王2, si=李四, lao=老王, wu=王五}
+
+-------foreach获取Map中所有的键:------
+san  wang  si  lao  wu  
+    
+-------foreach获取Map中所有的值:------
+张三  老王2  李四  老王  王五  
+    
+-------得到key的值的同时得到key所对应的值:-------
+san：张三   wang：老王2   si：李四   lao：老王   wu：王五   san--张三
+wang--老王2
+si--李四
+lao--老王
+wu--王五
+after map.size()：5
+after map.isEmpty()：false
+张三
+after map.remove()：{wang=老王2, si=李四, lao=老王, wu=王五}
+after map.get(si)：李四
+after map.containsKey(si)：true
+after containsValue(李四)：true
+李四
+after map.replace(si, 李四2):{wang=老王2, si=李四2, lao=老王, wu=王五}
+```
+
