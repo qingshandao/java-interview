@@ -368,7 +368,16 @@ final V put(K key, int hash, V value, boolean onlyIfAbsent) {
 >
 > - 获取失败，说明有竞争，进入 `scanAndLockForPut()`，进行一定次数的“自旋 + 检查 + 再尝试加锁”。
 >
-> - 如果 `tryLock()` 成功，`node` 为 null，说明后续不需要额外构造。
+> - 如果 `tryLock()` 成功，`node` 为 null，说明竞争不激烈，因为还没有遍历哈希桶，所以 **不确定是否需要构造新节点**；
+>
+> 	> 🧠 总结：为什么这样设计？
+> 	>
+> 	> | 情况           | tryLock 成功（无竞争）     | tryLock 失败（有竞争）        |
+> 	> | -------------- | -------------------------- | ----------------------------- |
+> 	> | 是否获取锁     | ✅ 是，立即获取             | ❌ 否，需要自旋、扫描、等待    |
+> 	> | 是否构造新节点 | ❌ 不确定是否需要，延迟构造 | ✅ 已知 key 不存在，提前构造   |
+> 	> | node 返回值    | `null`（稍后可能再构造）   | 新构造的 `HashEntry`（备用）  |
+> 	> | 优化目标       | 减少无用对象构造           | 缓解锁竞争、减少 CPU 资源浪费 |
 >
 > **2️⃣ 定位桶的位置**
 >
@@ -444,7 +453,54 @@ final V put(K key, int hash, V value, boolean onlyIfAbsent) {
 >
 > - `modCount++`：记录结构变更，用于 fail-fast 检测。
 >
-> 
+> 4️⃣ 插入新节点
+>
+> ```java
+> else {
+>     if (node != null)
+>         node.setNext(first);
+>     else
+>         node = new HashEntry<K,V>(hash, key, value, first);
+> ```
+>
+> - 如果链表为空（`e == null`），说明可以插入：
+> 	- `node != null`：说明 `scanAndLockForPut` 中已构造好 `HashEntry`，只需挂接。
+> 	- 否则创建新 `HashEntry` 对象，头插法挂在链表前面。
+>
+> 5️⃣ 检查是否需要扩容
+>
+> ```java
+> int c = count + 1;
+> if (c > threshold && tab.length < MAXIMUM_CAPACITY)
+>     rehash(node);
+> else
+>     setEntryAt(tab, index, node);
+> count = c;
+> ```
+>
+> - 如果插入后数量超过阈值，则进行扩容并插入`node`（`rehash()`中执行），会重新分配更大的 table 并重排。
+>
+> - 否则直接通过 `setEntryAt` 将新节点放入指定位置。
+>
+> 6️⃣ 释放锁
+>
+> ```java
+> } finally {
+>     unlock();
+> }
+> ```
+>
+> - 确保无论中途发生什么异常，都会释放锁。
+>
+> 7️⃣ 返回旧值（如有）
+>
+> ```java
+> return oldValue;
+> ```
+>
+> - 如果 key 已存在并被替换，返回旧值。
+>
+> - 如果是新增 entry，返回 `null`。
 
 由于 `Segment` 继承了 `ReentrantLock`，所以 `Segment` 内部可以很方便的获取锁，put 流程就用到了这个功能。
 
@@ -454,17 +510,21 @@ final V put(K key, int hash, V value, boolean onlyIfAbsent) {
 
 3. 遍历 put 新元素，为什么要遍历？因为这里获取的 `HashEntry` 可能是一个空元素，也可能是链表已存在，所以要区别对待。
 
-	如果这个位置上的 **`HashEntry` 不存在**：
+  如果这个位置上的 **`HashEntry` 不存在**：
 
-	1. 如果当前容量大于扩容阀值，小于最大容量，**进行扩容**。
-	2. 直接头插法插入。
+  1. 插入前先判断是否需要扩容（`c > threshold`），若需要扩容，**先执行 `rehash(node)`**；
+  2. 否则，执行头插法插入。
 
-	如果这个位置上的 **`HashEntry` 存在**：
+  如果这个位置上的 **`HashEntry` 存在**：
 
-	1. 判断链表当前元素 key 和 hash 值是否和要 put 的 key 和 hash 值一致。一致则替换值
-	2. 不一致，获取链表下一个节点，直到发现相同进行值替换，或者链表表里完毕没有相同的。 
-		1. 如果当前容量大于扩容阀值，小于最大容量，**进行扩容**。
-		2. 直接链表头插法插入。
+  - “遍历链表”：
+  	* 如果找到 key 相同的节点（通过 `==` 或 `equals` 判断）：
+  		* 如果 `onlyIfAbsent == false`，则替换该节点的值；
+  		* 返回旧值；
+  	* 如果没找到：
+  		* 判断是否需要扩容，若需要则执行 `rehash(node)`；
+  		* 否则，将 `node` 头插到链表上；
+  		* 更新计数，返回 null。
 
 4. 如果要插入的位置之前已经存在，替换后返回旧值，否则返回 null.
 
@@ -505,3 +565,156 @@ private HashEntry<K,V> scanAndLockForPut(K key, int hash, V value) {
 }
 ```
 
+## 4、扩容 rehash
+
+`ConcurrentHashMap` 的扩容只会扩容到原来的两倍。老数组里的数据移动到新的数组时，位置要么不变，要么变为 `index+ oldSize`，参数里的 node 会在扩容之后使用链表**头插法**插入到指定位置。
+
+```java
+private void rehash(HashEntry<K,V> node) {
+    HashEntry<K,V>[] oldTable = table;
+    // 老容量
+    int oldCapacity = oldTable.length;
+    // 新容量，扩大两倍
+    int newCapacity = oldCapacity << 1;
+    // 新的扩容阀值
+    threshold = (int)(newCapacity * loadFactor);
+    // 创建新的数组
+    HashEntry<K,V>[] newTable = (HashEntry<K,V>[]) new HashEntry[newCapacity];
+    // 新的掩码，默认2扩容后是4，-1是3，二进制就是11。
+    int sizeMask = newCapacity - 1;
+    for (int i = 0; i < oldCapacity ; i++) {
+        // 遍历老数组
+        HashEntry<K,V> e = oldTable[i];
+        if (e != null) {
+            HashEntry<K,V> next = e.next;
+            // 计算新的位置，新的位置只可能是不变或者是老的位置+老的容量。
+            int idx = e.hash & sizeMask;
+            if (next == null)   //  Single node on list
+                // 如果当前位置还不是链表，只是一个元素，直接赋值
+                newTable[idx] = e;
+            else { // Reuse consecutive sequence at same slot
+                // 如果是链表了
+                HashEntry<K,V> lastRun = e;
+                int lastIdx = idx;
+                // 新的位置只可能是不变或者是老的位置+老的容量。
+                // 遍历结束后，lastRun 后面的元素位置都是相同的
+                for (HashEntry<K,V> last = next; last != null; last = last.next) {
+                    int k = last.hash & sizeMask;
+                    if (k != lastIdx) {
+                        lastIdx = k;
+                        lastRun = last;
+                    }
+                }
+                // ，lastRun 后面的元素位置都是相同的，直接作为链表赋值到新位置。
+                newTable[lastIdx] = lastRun;
+                // Clone remaining nodes
+                for (HashEntry<K,V> p = e; p != lastRun; p = p.next) {
+                    // 遍历剩余元素，头插法到指定 k 位置。
+                    V v = p.value;
+                    int h = p.hash;
+                    int k = h & sizeMask;
+                    HashEntry<K,V> n = newTable[k];
+                    newTable[k] = new HashEntry<K,V>(h, p.key, v, n);
+                }
+            }
+        }
+    }
+    // 头插法插入新的节点
+    int nodeIndex = node.hash & sizeMask; // add the new node
+    node.setNext(newTable[nodeIndex]);
+    newTable[nodeIndex] = node;
+    table = newTable;
+}
+```
+
+- 这里第一个 for 是为了寻找这样一个节点，这个节点后面的所有 next 节点的新位置都是相同的。然后把这个作为一个链表赋值到新位置。
+
+- 第二个 for 循环是为了把剩余的元素通过头插法插入到指定位置链表。
+
+内部第二个 `for` 循环中使用了 `new HashEntry<K,V>(h, p.key, v, n)` 创建了一个新的 `HashEntry`，而不是复用之前的，是因为如果复用之前的，那么会导致正在遍历（如正在执行 `get` 方法）的线程由于指针的修改无法遍历下去。正如注释中所说的：
+
+> 当它们不再被可能正在并发遍历表的任何读取线程引用时，被替换的节点将被垃圾回收。
+>
+> The nodes they replace will be garbage collectable as soon as they are no longer referenced by any reader thread that may be in the midst of concurrently traversing table
+
+为什么需要再使用一个 `for` 循环找到 `lastRun` ，其实是为了减少对象创建的次数，正如注解中所说的：
+
+> 从统计上看，在默认的阈值下，当表容量加倍时，只有大约六分之一的节点需要被克隆。
+>
+> Statistically, at the default threshold, only about one-sixth of them need cloning when a table doubles.
+
+## 5、get
+
+到这里就很简单了，get 方法只需要两步即可。
+
+1. 计算得到 key 的存放位置。
+2. 遍历指定位置查找相同 key 的 value 值。
+
+```java
+public V get(Object key) {
+    Segment<K,V> s; // manually integrate access methods to reduce overhead
+    HashEntry<K,V>[] tab;
+    int h = hash(key);
+    long u = (((h >>> segmentShift) & segmentMask) << SSHIFT) + SBASE;
+    // 计算得到 key 的存放位置
+    if ((s = (Segment<K,V>)UNSAFE.getObjectVolatile(segments, u)) != null &&
+        (tab = s.table) != null) {
+        for (HashEntry<K,V> e = (HashEntry<K,V>) UNSAFE.getObjectVolatile
+                 (tab, ((long)(((tab.length - 1) & h)) << TSHIFT) + TBASE);
+             e != null; e = e.next) {
+            // 如果是链表，遍历查找到相同 key 的 value。
+            K k;
+            if ((k = e.key) == key || (e.hash == h && key.equals(k)))
+                return e.value;
+        }
+    }
+    return null;
+}
+```
+
+# 二、ConcurrentHashMap 1.8
+## 1、存储结构
+
+![](../assets/java8_concurrenthashmap.png)
+
+可以发现 Java8 的 ConcurrentHashMap 相对于 Java7 来说变化比较大，不再是之前的 **Segment 数组 + HashEntry 数组 + 链表**，而是 **Node 数组 + 链表 / 红黑树**。当冲突链表达到一定长度时，链表会转换成红黑树。
+
+## 2、初始化 initTable
+
+```java
+/**
+ * Initializes table, using the size recorded in sizeCtl.
+ */
+private final Node<K,V>[] initTable() {
+    Node<K,V>[] tab; 
+    int sc;
+    while ((tab = table) == null || tab.length == 0) {
+        //　如果 sizeCtl < 0 ,说明另外的线程执行CAS 成功，正在进行初始化。
+        if ((sc = sizeCtl) < 0)
+            // 让出 CPU 使用权
+            Thread.yield(); // lost initialization race; just spin
+        else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
+            try {
+                if ((tab = table) == null || tab.length == 0) {
+                    int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
+                    @SuppressWarnings("unchecked")
+                    Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
+                    table = tab = nt;
+                    sc = n - (n >>> 2);
+                }
+            } finally {
+                sizeCtl = sc;
+            }
+            break;
+        }
+    }
+    return tab;
+}
+```
+
+从源码中可以发现 `ConcurrentHashMap` 的初始化是通过**自旋和 CAS** 操作完成的。里面需要注意的是成员变量 `sizeCtl` （sizeControl 的缩写），它的值决定着当前的初始化状态。
+
+1. `-1` 说明正在初始化，其他线程需要自旋等待
+2. `-N`  说明 table 正在进行扩容，高 16 位表示扩容的标识戳，低 16 位减 1 为正在进行扩容的线程数
+3. `0`  表示 table 初始化大小，如果 table 没有初始化
+4. `>0 ` 表示 table 扩容的阈值，如果 table 已经初始化。
