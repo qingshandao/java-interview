@@ -518,6 +518,7 @@ final V put(K key, int hash, V value, boolean onlyIfAbsent) {
   如果这个位置上的 **`HashEntry` 存在**：
 
   - “遍历链表”：
+
   	* 如果找到 key 相同的节点（通过 `==` 或 `equals` 判断）：
   		* 如果 `onlyIfAbsent == false`，则替换该节点的值；
   		* 返回旧值；
