@@ -682,6 +682,8 @@ public V get(Object key) {
 
 ## 2、初始化 initTable
 
+这段代码是 JDK 1.8 `ConcurrentHashMap` 中延迟初始化 `table` 的方法 `initTable()`，它会在第一次 `put()` 时触发，它的目标是：**并发安全地初始化底层的 `Node<K,V>[] table` 数组。**
+
 ```java
 /**
  * Initializes table, using the size recorded in sizeCtl.
@@ -689,21 +691,34 @@ public V get(Object key) {
 private final Node<K,V>[] initTable() {
     Node<K,V>[] tab; 
     int sc;
+    // 外部循环 — 检查是否需要初始化
+    // 若 table == null 或长度为 0，就需要初始化；
     while ((tab = table) == null || tab.length == 0) {
-        //　如果 sizeCtl < 0 ,说明另外的线程执行CAS 成功，正在进行初始化。
+        //　如果 sizeCtl < 0 ,说明另外的线程执行CAS 成功，正在进行初始化或扩容。
         if ((sc = sizeCtl) < 0)
             // 让出 CPU 使用权
             Thread.yield(); // lost initialization race; just spin
+        
+        // 如果没有其他线程在初始化，那么尝试用 CAS 把 sizeCtl 从 sc 改为 -1
+        // - 如果成功，就说明 当前线程成为初始化者；
+        // - 如果失败，就重新自旋（while）
         else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
+            
+            // 真正初始化
             try {
+                // 再次检查 table == null 是为了防止“伪初始化”（其他线程刚好完成）
                 if ((tab = table) == null || tab.length == 0) {
+                    // 选择容量：
+                    // - 若 sizeCtl > 0：表示用户在构造方法中指定了初始化容量；
+                    // - 否则默认使用 DEFAULT_CAPACITY = 16；
                     int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
                     @SuppressWarnings("unchecked")
                     Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
                     table = tab = nt;
-                    sc = n - (n >>> 2);
+                    sc = n - (n >>> 2);	// 设置扩容阈值 = n * 0.75
                 }
             } finally {
+                // 设置新的 sizeCtl 为扩容阈值（即 capacity * loadFactor，通常是 0.75）
                 sizeCtl = sc;
             }
             break;
@@ -713,7 +728,7 @@ private final Node<K,V>[] initTable() {
 }
 ```
 
-从源码中可以发现 `ConcurrentHashMap` 的初始化是通过**自旋和 CAS** 操作完成的。里面需要注意的是成员变量 `sizeCtl` （sizeControl 的缩写），它的值决定着当前的初始化状态。
+从源码中可以发现 `ConcurrentHashMap` 的初始化是通过**自旋和 CAS** 操作完成的。里面需要注意的是成员变量 `sizeCtl` ，它的值决定着当前的初始化状态。
 
 | `sizeCtl` 的值  | 意义                                                         |
 | --------------- | ------------------------------------------------------------ |
@@ -722,3 +737,190 @@ private final Node<K,V>[] initTable() {
 | `0`             | 表示 **还未初始化**，第一次调用 `put()` 时将触发初始化，容量使用默认值 |
 | `> 0`           | 表示 table 已经初始化，且该值是**下一次触发扩容的阈值**（等价于 `table.length * loadFactor`） |
 
+> ❓ 为什么有两种 `< 0` 情况？
+>
+> | `sizeCtl` 的值 | 意义                                                         |
+> | -------------- | ------------------------------------------------------------ |
+> | `-1`           | 有线程正在进行 table 的 **初始化**                           |
+> | `< -1`         | table 正在被多个线程 **并发扩容**，值中包含：高16位：resize 标识戳低16位：参与扩容线程数-1 |
+>
+> 所以，只要 `sizeCtl < 0`，就说明**当前线程不应该去初始化 table**，否则就会导致并发初始化、破坏结构。
+>
+> ❓ 为什么这两种情况都 `Thread.yield()`？
+>
+> 因为：
+>
+> * 当前线程尝试初始化，但发现有其他线程已经抢先执行了；
+> * 为了 **不做无用功**，当前线程选择 `Thread.yield()`，**主动让出 CPU，避免死循环占用资源**；
+> * `yield()` 并不阻塞线程，只是告诉调度器“我先让一下”。
+>
+> 这是实现“**自旋 + 退让**”的一种策略。
+
+## 3、put
+
+这是 JDK **1.8 中 `ConcurrentHashMap` 的核心 `putVal()` 方法源码**，它相比 1.7 改用了 CAS 和 `synchronized` 的组合替代 `Segment` 分段锁，实现了更细粒度的并发控制。
+
+```java
+public V put(K key, V value) {
+    return putVal(key, value, false);
+}
+```
+
+> 参数说明：
+>
+> | 参数名         | 含义                                                         |
+> | -------------- | ------------------------------------------------------------ |
+> | `key`, `value` | 要插入的键值对，不能为空                                     |
+> | `onlyIfAbsent` | 如果为 `true`，表示“只插入，不覆盖已存在的值”；如果为 `false`，表示“覆盖已有值”。 |
+
+```java
+/** Implementation for put and putIfAbsent */
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+    // key 和 value 不能为空
+    if (key == null || value == null) throw new NullPointerException();
+    // 哈希扰动，spread() 是一个扰动函数，目的是：减少哈希冲突，使哈希值分布更均匀
+    int hash = spread(key.hashCode());
+    int binCount = 0;
+    
+    // 外层自旋：用于处理 CAS 冲突或并发扩容
+    for (Node<K,V>[] tab = table;;) {
+        // f = 目标位置元素
+        Node<K,V> f; int n, i, fh;// fh 后面存放目标位置的元素 hash 值
+         // 初始化数组 table（延迟初始化）
+        if (tab == null || (n = tab.length) == 0)
+            // 数组桶为空，初始化数组桶（自旋+CAS)
+            tab = initTable();
+        else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+            // 桶内为空，CAS 放入，不加锁，成功了就直接 break 跳出
+            if (casTabAt(tab, i, null,new Node<K,V>(hash, key, value, null)))
+                break;  // no lock when adding to empty bin
+        }
+        else if ((fh = f.hash) == MOVED)
+            tab = helpTransfer(tab, f);
+        else {
+            V oldVal = null;
+            // 使用 synchronized 加锁加入节点
+            synchronized (f) {
+                if (tabAt(tab, i) == f) {
+                    // 说明是链表
+                    if (fh >= 0) {
+                        binCount = 1;
+                        // 循环加入新的或者覆盖节点
+                        for (Node<K,V> e = f;; ++binCount) {
+                            K ek;
+                            if (e.hash == hash &&
+                                ((ek = e.key) == key ||
+                                 (ek != null && key.equals(ek)))) {
+                                oldVal = e.val;
+                                if (!onlyIfAbsent)
+                                    e.val = value;
+                                break;
+                            }
+                            Node<K,V> pred = e;
+                            if ((e = e.next) == null) {
+                                pred.next = new Node<K,V>(hash, key,
+                                                          value, null);
+                                break;
+                            }
+                        }
+                    }
+                    else if (f instanceof TreeBin) {
+                        // 红黑树
+                        Node<K,V> p;
+                        binCount = 2;
+                        if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
+                                                       value)) != null) {
+                            oldVal = p.val;
+                            if (!onlyIfAbsent)
+                                p.val = value;
+                        }
+                    }
+                }
+            }
+            if (binCount != 0) {
+                if (binCount >= TREEIFY_THRESHOLD)
+                    treeifyBin(tab, i);
+                if (oldVal != null)
+                    return oldVal;
+                break;
+            }
+        }
+    }
+    addCount(1L, binCount);
+    return null;
+}
+```
+
+> **🔹 1、 参数校验和哈希扰动**
+>
+> ```java
+> if (key == null || value == null) throw new NullPointerException();
+> int hash = spread(key.hashCode());
+> ```
+>
+> - `key`、`value` 不允许为 `null`，否则抛异常；
+>
+> - `spread()` 是一个扰动函数，目的是：**减少哈希冲突，使哈希值分布更均匀**；
+>
+> 	- 它的核心是高位和低位做异或，然后取低位做索引。
+>
+> 	
+>
+> **🔹 2、 外层自旋：用于处理 CAS 冲突或并发扩容**
+>
+> ```java
+> for (Node<K,V>[] tab = table;;) {
+> ```
+>
+> 这是一个自旋循环（无限重试），用于处理：
+>
+> * CAS 失败；
+> * 帮助扩容中；
+> * 多线程竞争的重复尝试。
+>
+> 
+>
+> **🔹 3.0、 初始化数组 `table`（延迟初始化）**
+>
+> ```java
+> if (tab == null || (n = tab.length) == 0)
+>     tab = initTable();
+> ```
+>
+> - 如果 `table` 尚未初始化，则通过 `initTable()` 使用 **CAS + 自旋** 安全初始化数组；
+>
+> - 该操作只会成功一次，其它线程会等待。
+>
+> 
+>
+> **🔹 3.1、 桶位为空，CAS 插入**
+>
+> ```java
+> else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+>     if (casTabAt(tab, i, null, new Node<>(hash, key, value, null)))
+>         break;
+> }
+> ```
+>
+> * 计算桶位索引：`i = (n - 1) & hash`
+> * 如果该桶是空的，就用 CAS 尝试放入新节点（无锁）；
+> * CAS 成功立即跳出循环。
+>
+> ✅ **这是最理想、最快的路径**，没有锁！
+>
+> 
+>
+> **🔹 3.2、 桶位为 `MOVED`，协助扩容**
+>
+> ```java
+> else if ((fh = f.hash) == MOVED)
+>     tab = helpTransfer(tab, f);
+> ```
+>
+> - 如果 `hash == -1`（`MOVED`），表示该桶正在被扩容；
+>
+> - 当前线程将调用 `helpTransfer()` 协助扩容；
+>
+> - 完成后 `tab` 会变更为新的扩容后数组，继续循环。
+>
+> 
