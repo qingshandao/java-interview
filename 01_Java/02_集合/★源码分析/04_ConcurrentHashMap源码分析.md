@@ -851,6 +851,23 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 }
 ```
 
+> **✅ 整体执行流程图解（简化）**
+>
+> 1. 校验空值
+> 2. 计算 hash
+> 3. 判断 `table` 是否为空，空则初始化
+> 4. 获取桶位 `i = (n - 1) & hash`
+> 5. 若该桶位 `null`，使用 CAS 直接插入
+> 6. 若已被占用：
+> 	* 如果是 `MOVED`，说明在扩容，协助扩容
+> 	* 否则加锁插入（链表或红黑树）
+> 7. 插入后判断是否需要树化
+> 8. 统计元素数量，触发扩容
+
+
+
+> **✅ 逐段详解**
+>
 > **🔹 1、 参数校验和哈希扰动**
 >
 > ```java
@@ -861,10 +878,9 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 > - `key`、`value` 不允许为 `null`，否则抛异常；
 >
 > - `spread()` 是一个扰动函数，目的是：**减少哈希冲突，使哈希值分布更均匀**；
+> - 它的核心是高位和低位做异或，然后取低位做索引。
 >
-> 	- 它的核心是高位和低位做异或，然后取低位做索引。
->
-> 	
+> 
 >
 > **🔹 2、 外层自旋：用于处理 CAS 冲突或并发扩容**
 >
@@ -889,6 +905,15 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 >
 > - 如果 `table` 尚未初始化，则通过 `initTable()` 使用 **CAS + 自旋** 安全初始化数组；
 >
+> 	- 🔹 默认初始化完成后的状态如下：
+>
+> 		> | 字段        | 值                                   |
+> 		> | ----------- | ------------------------------------ |
+> 		> | `table`     | 长度为 16 的 `Node<K,V>[]`           |
+> 		> | `sizeCtl`   | `12`（即 `16 * 0.75`，负载因子阈值） |
+> 		> | `threshold` | 没有该字段，控制扩容的是 `sizeCtl`   |
+> 		> | `每个桶位`  | 初始都为 `null`                      |
+>
 > - 该操作只会成功一次，其它线程会等待。
 >
 > 
@@ -897,6 +922,7 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 >
 > ```java
 > else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+>     // casTabAt()：在不加锁的情况下，把第 i 个桶位设置为新的 Node，前提是原来是 null。
 >     if (casTabAt(tab, i, null, new Node<>(hash, key, value, null)))
 >         break;
 > }
@@ -923,4 +949,154 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 >
 > - 完成后 `tab` 会变更为新的扩容后数组，继续循环。
 >
+> > `fh` 的特殊值：
+> >
+> > | `f.hash` 的值  | 含义                                  |
+> > | -------------- | ------------------------------------- |
+> > | `>= 0`         | 普通的链表节点（正常 key 的 hash 值） |
+> > | `-1` (`MOVED`) | 标记该桶正在迁移（扩容中）            |
+> > | `-2`           | 红黑树的根节点标记（TreeBin）         |
+>
+> ⚠注意：即使前面判断了 `tab[i] == null`，也必须用 `casTabAt(...)` 再次验证，是为了保证在 **并发情况下这个桶位只被插入一次**。
+>
 > 
+>
+> **🔹 3.3、 已有节点，加锁处理链表/红黑树冲突**
+>
+> ```java
+> else {
+>     V oldVal = null;
+>     synchronized (f) {
+>         if (tabAt(tab, i) == f) {
+>             // ...
+>         }
+>     }
+> }
+> ```
+>
+> 
+>
+> **🔹 3.3.1、 处理链表插入**
+>
+> ```java
+> if (fh >= 0) {
+>     binCount = 1;
+>     for (Node<K,V> e = f;; ++binCount) {
+>         K ek;
+>         if (e.hash == hash &&
+>             ((ek = e.key) == key || (ek != null && key.equals(ek)))) {
+>             oldVal = e.val;
+>             if (!onlyIfAbsent)
+>                 e.val = value;
+>             break;
+>         }
+>         Node<K,V> pred = e;
+>         if ((e = e.next) == null) {
+>             pred.next = new Node<>(hash, key, value, null);
+>             break;
+>         }
+>     }
+> }
+> 
+> ```
+>
+> 如果该桶是链表：
+>
+> * 遍历链表查找：
+>
+> 	* 如果 key 相同，替换 value；
+> 	* 否则尾插（**注意：这是链表尾插，而 JDK1.7 是头插！**）
+>
+> * `binCount` 用于记录链长，后续判断是否要树化。
+>
+> 	
+>
+> **🔹 3.3.2、 红黑树插入**
+>
+> ```java
+> else if (f instanceof TreeBin) {
+>     Node<K,V> p;
+>     binCount = 2;
+>     if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key, value)) != null) {
+>         oldVal = p.val;
+>         if (!onlyIfAbsent)
+>             p.val = value;
+>     }
+> }
+> 
+> ```
+>
+> 如果该桶是树（`TreeBin`）：
+>
+> * 通过 `putTreeVal()` 插入红黑树；
+> * 与链表逻辑类似，只是结构不同。
+>
+> 
+>
+> **🔹 3.4. 判断是否树化**
+>
+> ```java
+> if (binCount >= TREEIFY_THRESHOLD)
+>     treeifyBin(tab, i);
+> 
+> ```
+>
+> - 如果链表节点数超过 `TREEIFY_THRESHOLD = 8`，则尝试树化；
+>
+> - 但如果数组长度小于 `MIN_TREEIFY_CAPACITY = 64`，会优先尝试扩容而不是树化。
+>
+> 
+>
+> **🔹 3.5、 插入完成后更新计数**
+>
+> ```java
+> addCount(1L, binCount);
+> ```
+>
+> - 更新元素个数 `size`；
+>
+> - 触发扩容逻辑（如果达到阈值）。
+
+
+
+> **✅ 总结：JDK1.8 `putVal()` 的并发优化策略**
+>
+> | 场景                | 并发策略                              |
+> | ------------------- | ------------------------------------- |
+> | table 初始化        | 自旋 + CAS                            |
+> | 桶位为空插入        | 无锁 CAS                              |
+> | 桶位冲突（链表/树） | 使用 `synchronized` 加锁              |
+> | 扩容中              | 调用 `helpTransfer()` 协助扩容        |
+> | 统计数量            | 使用 `LongAdder` 方案计数，避免全局锁 |
+
+## 4、get
+
+
+
+```java
+public V get(Object key) {
+    Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+    // key 所在的 hash 位置
+    int h = spread(key.hashCode());
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (e = tabAt(tab, (n - 1) & h)) != null) {
+        // 如果指定位置元素存在，头结点hash值相同
+        if ((eh = e.hash) == h) {
+            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+                // key hash 值相等，key值相同，直接返回元素 value
+                return e.val;
+        }
+        else if (eh < 0)
+            // 头结点hash值小于0，说明正在扩容或者是红黑树，find查找
+            return (p = e.find(h, key)) != null ? p.val : null;
+        while ((e = e.next) != null) {
+            // 是链表，遍历查找
+            if (e.hash == h &&
+                ((ek = e.key) == key || (ek != null && key.equals(ek))))
+                return e.val;
+        }
+    }
+    return null;
+}
+```
+
