@@ -1071,24 +1071,32 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
 
 ## 4、get
 
-
+这段是 **`ConcurrentHashMap`的核心查找逻辑**。它使用了链表、红黑树、以及扩容迁移处理等机制。
 
 ```java
 public V get(Object key) {
     Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
-    // key 所在的 hash 位置
+    // 先对 key 的 hashCode() 做一次扰动计算（spread），以便哈希更均匀。
     int h = spread(key.hashCode());
+    // 1.检查哈希表是否初始化；2.获取当前表长度 n；计算桶位下标：3.(n - 1) & h，通过位运算得到目标位置；
+    // 4.获取该桶的第一个节点 e。
     if ((tab = table) != null && (n = tab.length) > 0 &&
         (e = tabAt(tab, (n - 1) & h)) != null) {
-        // 如果指定位置元素存在，头结点hash值相同
+        // 判断桶头的 hash 值是否和目标 hash 相同；
         if ((eh = e.hash) == h) {
+            // 如果相同，再判断 key 是否相等
             if ((ek = e.key) == key || (ek != null && key.equals(ek)))
                 // key hash 值相等，key值相同，直接返回元素 value
                 return e.val;
         }
+        // 说明桶是 特殊结构（不是普通节点）：
+        // - eh == -1：正在扩容（MOVED）；
+        // - eh == -2：红黑树（TreeBin）。
         else if (eh < 0)
-            // 头结点hash值小于0，说明正在扩容或者是红黑树，find查找
+            // e.find() 会自动判断是红黑树查找还是协助扩容。
             return (p = e.find(h, key)) != null ? p.val : null;
+        // 这是进入链表查找的情况，没有在头节点找到，继续往后遍历；
+        // 遇到匹配的 hash 和相等的 key，就返回其 val。
         while ((e = e.next) != null) {
             // 是链表，遍历查找
             if (e.hash == h &&
