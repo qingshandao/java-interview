@@ -262,3 +262,117 @@ public LinkedHashMap(int initialCapacity,
 
 ## 3、get 方法
 
+`get` 方法是 `LinkedHashMap` 增删改查操作中唯一一个重写的方法， `accessOrder` 为 true 的情况下， 它会在元素查询完成之后，将当前访问的元素移到链表的末尾。
+
+```java
+public V get(Object key) {
+     Node < K, V > e;
+     //获取key的键值对,若为空直接返回
+     if ((e = getNode(hash(key), key)) == null)
+         return null;
+     //若accessOrder为true，则调用afterNodeAccess将当前元素移到链表末尾
+     if (accessOrder)
+         afterNodeAccess(e);
+     //返回键值对的值
+     return e.value;
+ }
+```
+
+从源码可以看出，`get` 的执行步骤非常简单:
+
+1. 调用父类即 `HashMap` 的 `getNode` 获取键值对，若为空则直接返回。
+2. 判断 `accessOrder` 是否为 true，若为 true 则说明需要保证 `LinkedHashMap` 的链表访问有序性，执行步骤 3。
+3. 调用 `LinkedHashMap` 重写的 `afterNodeAccess` 将当前元素添加到链表末尾。
+
+关键点在于 `afterNodeAccess` 方法的实现，这个方法负责将元素移动到链表末尾。
+
+```java
+void afterNodeAccess(Node < K, V > e) { // move node to last
+    LinkedHashMap.Entry < K, V > last;
+    //如果accessOrder 且当前节点不为链表尾节点
+    if (accessOrder && (last = tail) != e) {
+
+        //获取当前节点、以及前驱节点和后继节点
+        LinkedHashMap.Entry < K, V > p =
+            (LinkedHashMap.Entry < K, V > ) e, b = p.before, a = p.after;
+
+        //将当前节点的后继节点指针指向空，使其和后继节点断开联系
+        p.after = null;
+
+        //如果前驱节点为空，则说明当前节点是链表的首节点，故将后继节点设置为首节点
+        if (b == null)
+            head = a;
+        else
+            //如果前驱节点不为空，则让前驱节点指向后继节点
+            b.after = a;
+
+        //如果后继节点不为空，则让后继节点指向前驱节点
+        if (a != null)
+            a.before = b;
+        else
+            //如果后继节点为空，则说明当前节点在链表最末尾，直接让last 指向前驱节点,这个 else其实 没有意义，因为最开头if已经确保了p不是尾结点了，自然after不会是null
+            last = b;
+
+        //如果last为空，则说明当前链表只有一个节点p，则将head指向p
+        if (last == null)
+            head = p;
+        else {
+            //反之让p的前驱指针指向尾节点，再让尾节点的前驱指针指向p
+            p.before = last;
+            last.after = p;
+        }
+        //tail指向p，自此将节点p移动到链表末尾
+        tail = p;
+
+        ++modCount;
+    }
+}
+```
+
+从源码可以看出， `afterNodeAccess` 方法完成了下面这些操作:
+
+1. 如果 `accessOrder` 为 true 且链表尾部不为当前节点 p，我们则需要将当前节点移到链表尾部。
+2. 获取当前节点 p、以及它的前驱节点 b 和后继节点 a。
+3. 将当前节点 p 的后继指针设置为 null，使其和后继节点 p 断开联系。
+4. 尝试将前驱节点指向后继节点，若前驱节点为空，则说明当前节点 p 就是链表首节点，故直接将后继节点 a 设置为首节点，随后我们再将 p 追加到 a 的末尾。
+5. 再尝试让后继节点 a 指向前驱节点 b。
+6. 上述操作让前驱节点和后继节点完成关联，并将当前节点 p 独立出来，这一步则是将当前节点 p 追加到链表末端，如果链表末端为空，则说明当前链表只有一个节点 p，所以直接让 head 指向 p 即可。
+7. 上述操作已经将 p 成功到达链表末端，最后我们将 tail 指针即指向链表末端的指针指向 p 即可。
+
+可以结合这张图理解，展示了 key 为 13 的元素被移动到了链表尾部。
+
+<img src="../assets/linkedhashmap-get.png" style="zoom:80%;" />
+
+过程示意图如下：
+
+<img src="../assets/linkedhashmap-get_draw.png" style="zoom:80%;" />
+
+## 4、remove 方法后置操作——afterNodeRemoval
+
+`LinkedHashMap` 并没有对 `remove` 方法进行重写，而是直接继承 `HashMap` 的 `remove` 方法，为了保证键值对移除后双向链表中的节点也会同步被移除，`LinkedHashMap` 重写了 `HashMap` 的空实现方法 `afterNodeRemoval`。
+
+```java
+final Node<K,V> removeNode(int hash, Object key, Object value,
+                               boolean matchValue, boolean movable) {
+        //略
+            if (node != null && (!matchValue || (v = node.value) == value ||
+                                 (value != null && value.equals(v)))) {
+                if (node instanceof TreeNode)
+                    ((TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
+                else if (node == p)
+                    tab[index] = node.next;
+                else
+                    p.next = node.next;
+                ++modCount;
+                --size;
+                //HashMap的removeNode完成元素移除后会调用afterNodeRemoval进行移除后置操作
+                afterNodeRemoval(node);
+                return node;
+            }
+        }
+        return null;
+    }
+//空实现
+void afterNodeRemoval(Node<K,V> p) { }
+```
+
