@@ -349,9 +349,15 @@ void afterNodeAccess(Node < K, V > e) { // move node to last
 
 ## 4、remove 方法后置操作——afterNodeRemoval
 
-`LinkedHashMap` 并没有对 `remove` 方法进行重写，而是直接继承 `HashMap` 的 `remove` 方法，为了保证键值对移除后双向链表中的节点也会同步被移除，`LinkedHashMap` 重写了 `HashMap` 的空实现方法 `afterNodeRemoval`。
+`LinkedHashMap` 并没有对 `remove` 方法进行重写，而是直接继承 `HashMap` 的 `remove` 方法，`HashMap` 中的 `remove` 方法内部调用的 `removeNode` 方法将节点从 bucket 删除后，调用了 `afterNodeRemoval`。
 
 ```java
+public V remove(Object key) {
+        Node<K,V> e;
+        return (e = removeNode(hash(key), key, null, false, true)) == null ?
+            null : e.value;
+    }
+
 final Node<K,V> removeNode(int hash, Object key, Object value,
                                boolean matchValue, boolean movable) {
         //略
@@ -374,5 +380,32 @@ final Node<K,V> removeNode(int hash, Object key, Object value,
     }
 //空实现
 void afterNodeRemoval(Node<K,V> p) { }
+```
+
+为了保证键值对移除后双向链表中的节点也会同步被移除，`LinkedHashMap` 重写了 `HashMap` 的空实现方法 `afterNodeRemoval`。
+
+```java
+void afterNodeRemoval(Node<K,V> e) { // unlink
+
+    //获取当前节点p、以及e的前驱节点b和后继节点a
+        LinkedHashMap.Entry<K,V> p =
+            (LinkedHashMap.Entry<K,V>)e, b = p.before, a = p.after;
+    //将p的前驱和后继指针都设置为null，使其和前驱、后继节点断开联系
+        p.before = p.after = null;
+
+    //如果前驱节点为空，则说明当前节点p是链表首节点，让head指针指向后继节点a即可
+        if (b == null)
+            head = a;
+        else
+        //如果前驱节点b不为空，则让b直接指向后继节点a
+            b.after = a;
+
+    //如果后继节点为空，则说明当前节点p在链表末端，所以直接让tail指针指向前驱节点a即可
+        if (a == null)
+            tail = b;
+        else
+        //反之后继节点的前驱指针直接指向前驱节点
+            a.before = b;
+    }
 ```
 
