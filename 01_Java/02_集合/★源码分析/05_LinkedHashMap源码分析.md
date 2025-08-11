@@ -262,7 +262,7 @@ public LinkedHashMap(int initialCapacity,
 
 ## 3、get 方法
 
-`get` 方法是 `LinkedHashMap` 增删改查操作中唯一一个重写的方法， `accessOrder` 为 true 的情况下， 它会在元素查询完成之后，将当前访问的元素移到链表的末尾。
+`get` 方法是 `LinkedHashMap` 增删改查操作中唯一一个**重写**的方法， `accessOrder` 为 `true` 的情况下， 它会在元素查询完成之后，将当前访问的元素移到链表的末尾。
 
 ```java
 public V get(Object key) {
@@ -329,7 +329,7 @@ void afterNodeAccess(Node < K, V > e) { // move node to last
 }
 ```
 
-从源码可以看出， `afterNodeAccess` 方法完成了下面这些操作:
+从源码可以看出， `afterNodeAccess` 方法完成了下面这些操作：
 
 1. 如果 `accessOrder` 为 true 且链表尾部不为当前节点 p，我们则需要将当前节点移到链表尾部。
 2. 获取当前节点 p、以及它的前驱节点 b 和后继节点 a。
@@ -349,7 +349,7 @@ void afterNodeAccess(Node < K, V > e) { // move node to last
 
 ## 4、remove 方法后置操作——afterNodeRemoval
 
-`LinkedHashMap` 并没有对 `remove` 方法进行重写，而是直接继承 `HashMap` 的 `remove` 方法，`HashMap` 中的 `remove` 方法内部调用的 `removeNode` 方法将节点从 bucket 删除后，调用了 `afterNodeRemoval`。
+`LinkedHashMap` 并没有对 `remove` 方法进行重写，而是直接继承 `HashMap` 的 `remove` 方法，`HashMap` 中的 `remove` 方法内部调用的 `removeNode` 方法将节点从 bucket 删除后，调用了 `afterNodeRemoval`，如下为 `HashMap` 中的方法：
 
 ```java
 public V remove(Object key) {
@@ -382,7 +382,7 @@ final Node<K,V> removeNode(int hash, Object key, Object value,
 void afterNodeRemoval(Node<K,V> p) { }
 ```
 
-为了保证键值对移除后双向链表中的节点也会同步被移除，`LinkedHashMap` 重写了 `HashMap` 的空实现方法 `afterNodeRemoval`。
+为了保证键值对移除后双向链表中的节点也会同步被移除，`LinkedHashMap` **重写**了 `HashMap` 的空实现方法 `afterNodeRemoval`：
 
 ```java
 void afterNodeRemoval(Node<K,V> e) { // unlink
@@ -408,4 +408,240 @@ void afterNodeRemoval(Node<K,V> e) { // unlink
             a.before = b;
     }
 ```
+
+从源码可以看出， `afterNodeRemoval` 方法的整体操作就是让当前节点 p 和前驱节点、后继节点断开联系，等待 gc 回收，整体步骤为:
+
+1. 获取当前节点 p、以及 p 的前驱节点 b 和后继节点 a。
+2. 让当前节点 p 和其前驱、后继节点断开联系。
+3. 尝试让前驱节点 b 指向后继节点 a，若 b 为空则说明当前节点 p 在链表首部，我们直接将 head 指向后继节点 a 即可。
+4. 尝试让后继节点 a 指向前驱节点 b，若 a 为空则说明当前节点 p 在链表末端，所以直接让 tail 指针指向前驱节点 b 即可。
+
+可以结合这张图理解，展示了 key 为 13 的元素被删除，也就是从链表中移除了这个元素。
+
+![](../assets/linkedhashmap-remove.png)
+
+## 5、put 方法后置操作——afterNodeInsertion
+
+同样的 `LinkedHashMap` 并没有实现插入方法（`put` 和 `putVal`），而是直接继承 `HashMap` 的所有插入方法交由用户使用，但为了维护双向链表访问的有序性，它做了这样两件事：
+
+1. **重写** `afterNodeAccess`(上文提到过，将访问的节点移动至末尾)，如果当前被插入的 key 已存在与 `map` 中，因为 `LinkedHashMap` 的插入操作会将新节点追加至链表末尾，所以对于存在的 key 则调用 `afterNodeAccess` 将其放到链表末端。
+2. **重写**了 `HashMap` 的 `afterNodeInsertion` 方法，当 `removeEldestEntry` 返回 true 时，会将链表首节点移除。
+
+这一点可以在 `HashMap` 的插入操作核心方法 `putVal` 中看到。
+
+```java
+final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
+                   boolean evict) {
+          //略
+            if (e != null) { // existing mapping for key
+                V oldValue = e.value;
+                if (!onlyIfAbsent || oldValue == null)
+                    e.value = value;
+                 //如果当前的key在map中存在，则调用afterNodeAccess
+                afterNodeAccess(e);
+                return oldValue;
+            }
+        }
+        ++modCount;
+        if (++size > threshold)
+            resize();
+         //调用插入后置方法，该方法被LinkedHashMap重写
+        afterNodeInsertion(evict);
+        return null;
+    }
+```
+
+上述步骤的源码上文已经解释过了，所以这里着重了解一下 `afterNodeInsertion` 的工作流程，假设重写了 `removeEldestEntry`，当链表 `size` 超过 `capacity` 时，就返回 true。
+
+```java
+/**
+ * 判断size超过容量时返回true，告知LinkedHashMap移除最老的缓存项(即链表的第一个元素)
+ */
+protected boolean removeEldestEntry(Map.Entry < K, V > eldest) {
+    return size() > capacity;
+}
+```
+
+以下图为例，假设笔者最后新插入了一个不存在的节点 19，假设 `capacity` 为 4，所以 `removeEldestEntry` 返回 true，我们要将链表首节点移除。
+
+![](../assets/linkedhashmap-after-insert-1.png)
+
+移除的步骤很简单，查看链表首节点是否存在，若存在则断开首节点和后继节点的关系，并让首节点指针指向下一节点，所以 head 指针指向了 12，节点 10 成为没有任何引用指向的空对象，等待 GC。
+
+![](../assets/linkedhashmap-after-insert-2.png)
+
+```java
+void afterNodeInsertion(boolean evict) { // possibly remove eldest
+        LinkedHashMap.Entry<K,V> first;
+        //如果evict为true且队首元素不为空以及removeEldestEntry返回true，则说明需要最老的元素(即在链表首部的元素)移除。
+        if (evict && (first = head) != null && removeEldestEntry(first)) {
+          //获取链表首部的键值对的key
+            K key = first.key;
+            //调用removeNode将元素从HashMap的bucket中移除，并和LinkedHashMap的双向链表断开，等待gc回收
+            removeNode(hash(key), key, null, false, true);
+        }
+    }
+```
+
+> `evict`：是否是因为 LRU 淘汰（eviction）而插入新值，告诉方法“这次插入是否允许触发移除最老元素的逻辑”。
+
+从源码可以看出， `afterNodeInsertion` 方法完成了下面这些操作：
+
+1. 判断 `eldest` 是否为 true，只有为 true 才能说明允许将最年长的键值对（即链表首部的元素）进行移除，具体是否具体要进行移除，还得确定链表是否为空`((first = head) != null)`，以及 `removeEldestEntry` 方法是否返回 true，只有这两个方法返回 true 才能确定当前链表不为空，且链表需要进行移除操作了。
+2. 获取链表第一个元素的 key。
+3. 调用 `HashMap` 的 `removeNode` 方法，该方法我们上文提到过，它会将节点从 `HashMap` 的 bucket 中移除，并且 `LinkedHashMap` 还重写了 `removeNode` 中的 `afterNodeRemoval` 方法，所以这一步将通过调用 `removeNode` 将元素从 `HashMap` 的 bucket 中移除，并和 `LinkedHashMap` 的双向链表断开，等待 gc 回收。
+
+# 四、LinkedHashMap 和 HashMap 遍历性能比较
+
+`LinkedHashMap` 维护了一个双向链表来记录数据插入的顺序，因此在迭代遍历生成的迭代器的时候，是按照双向链表的路径进行遍历的。这一点相比于 `HashMap` 那种遍历整个 bucket 的方式来说，高效许多。
+
+`HashMap`  的 `next` 只是 **同一个 bucket 内** 的链表指针，而不是 `LinkedHashMap` 的全局的“插入顺序”指针。
+
+这一点可以从两者的迭代器中得以印证，先来看看 `HashMap` 的迭代器，可以看到 `HashMap` 迭代键值对时会用到一个 `nextNode` 方法，该方法会返回 next 指向的下一个元素，并会从 next 开始遍历 bucket 找到下一个 bucket 中不为空的元素 Node。
+
+```java
+ final class EntryIterator extends HashIterator
+ implements Iterator < Map.Entry < K, V >> {
+     public final Map.Entry < K,
+     V > next() {
+         return nextNode();
+     }
+ }
+
+ //获取下一个Node
+ final Node < K, V > nextNode() {
+     Node < K, V > [] t;
+     //获取下一个元素next
+     Node < K, V > e = next;
+     if (modCount != expectedModCount)
+         throw new ConcurrentModificationException();
+     if (e == null)
+         throw new NoSuchElementException();
+     //将next指向bucket中下一个不为空的Node
+     if ((next = (current = e).next) == null && (t = table) != null) {
+         do {} while (index < t.length && (next = t[index++]) == null);
+     }
+     return e;
+ }
+```
+
+关于 `HashMap` 的迭代过程：
+
+- HashMap 的迭代器确实会用到 `nextNode()`，这个方法大致逻辑是：
+	- 如果当前 bucket 链表还有下一个节点，就返回 `next`；
+	- 否则就去找下一个 **非空 bucket**，返回它的第一个节点；
+	- 重复直到遍历完所有 bucket。
+
+- 这个遍历是**按 bucket 顺序**（hash 分布的顺序，不是插入顺序），并且每次都要跳 bucket。
+
+相比之下 `LinkedHashMap` 的迭代器则是直接使用通过 `after` 指针快速定位到当前节点的后继节点，简洁高效许多。
+
+```java
+ final class LinkedEntryIterator extends LinkedHashIterator
+ implements Iterator < Map.Entry < K, V >> {
+     public final Map.Entry < K,
+     V > next() {
+         return nextNode();
+     }
+ }
+ //获取下一个Node
+ final LinkedHashMap.Entry < K, V > nextNode() {
+     //获取下一个节点next
+     LinkedHashMap.Entry < K, V > e = next;
+     if (modCount != expectedModCount)
+         throw new ConcurrentModificationException();
+     if (e == null)
+         throw new NoSuchElementException();
+     //current 指针指向当前节点
+     current = e;
+     //next直接当前节点的after指针快速定位到下一个节点
+     next = e.after;
+     return e;
+ }
+```
+
+LinkedHashMap 继承了 HashMap，但**额外**维护了一个 **双向链表**：
+
+```java
+transient LinkedHashMap.Entry<K,V> head;
+transient LinkedHashMap.Entry<K,V> tail;
+```
+
+> 这个双向链表通过 `before`、`after` 指针把所有节点串起来，顺序可以是：
+>
+> * 插入顺序（默认）
+> * 访问顺序（`accessOrder = true`）
+>
+> 迭代器直接沿着这个双向链表走，不用跳 bucket，也不需要去遍历 table[] 数组找下一个非空 bucket。
+
+为了验证笔者所说的观点，笔者对这两个容器进行了压测，测试插入 1000w 和迭代 1000w 条数据的耗时，代码如下：
+
+```java
+int count = 1000_0000;
+Map<Integer, Integer> hashMap = new HashMap<>();
+Map<Integer, Integer> linkedHashMap = new LinkedHashMap<>();
+
+long start, end;
+
+start = System.currentTimeMillis();
+for (int i = 0; i < count; i++) {
+    hashMap.put(ThreadLocalRandom.current().nextInt(1, count), ThreadLocalRandom.current().nextInt(0, count));
+}
+end = System.currentTimeMillis();
+System.out.println("map time putVal: " + (end - start));
+
+start = System.currentTimeMillis();
+for (int i = 0; i < count; i++) {
+    linkedHashMap.put(ThreadLocalRandom.current().nextInt(1, count), ThreadLocalRandom.current().nextInt(0, count));
+}
+end = System.currentTimeMillis();
+System.out.println("linkedHashMap putVal time: " + (end - start));
+
+start = System.currentTimeMillis();
+long num = 0;
+for (Integer v : hashMap.values()) {
+    num = num + v;
+}
+end = System.currentTimeMillis();
+System.out.println("map get time: " + (end - start));
+
+start = System.currentTimeMillis();
+for (Integer v : linkedHashMap.values()) {
+    num = num + v;
+}
+end = System.currentTimeMillis();
+System.out.println("linkedHashMap get time: " + (end - start));
+System.out.println(num);
+```
+
+从输出结果来看，因为 `LinkedHashMap` 需要维护双向链表的缘故，插入元素相较于 `HashMap` 会更耗时，但是有了双向链表明确的前后节点关系，迭代效率相对于前者高效了许多。不过，总体来说却别不大，毕竟数据量这么庞大。
+
+```java
+map time putVal: 5880
+linkedHashMap putVal time: 7567
+map get time: 143
+linkedHashMap get time: 67
+63208969074998
+```
+
+# 五、LinkedHashMap 常见面试题
+## 1、什么是 LinkedHashMap？
+
+`LinkedHashMap` 是 Java 集合框架中 `HashMap` 的一个子类，它继承了 `HashMap` 的所有属性和方法，并且在 `HashMap` 的基础重写了 `afterNodeRemoval`、`afterNodeInsertion`、`afterNodeAccess` 方法。使之拥有顺序插入和访问有序的特性。
+
+## 2、LinkedHashMap 如何按照插入顺序迭代元素？
+
+`LinkedHashMap` 按照插入顺序迭代元素是它的默认行为。`LinkedHashMap` 内部维护了一个双向链表，用于记录元素的插入顺序。因此，当使用迭代器迭代元素时，元素的顺序与它们最初插入的顺序相同。
+
+## 3、LinkedHashMap 如何按照访问顺序迭代元素？
+
+`LinkedHashMap` 可以通过构造函数中的 `accessOrder` 参数指定按照访问顺序迭代元素。当 `accessOrder` 为 true 时，每次访问一个元素时，该元素会被移动到链表的末尾，因此下次访问该元素时，它就会成为链表中的最后一个元素，从而实现按照访问顺序迭代元素。
+
+## 4、LinkedHashMap 如何实现 LRU 缓存？
+
+将 `accessOrder` 设置为 true 并重写 `removeEldestEntry` 方法当链表大小超过容量时返回 true，使得每次访问一个元素时，该元素会被移动到链表的末尾。一旦插入操作让 `removeEldestEntry` 返回 true 时，视为缓存已满，`LinkedHashMap` 就会将链表首元素移除，由此我们就能实现一个 LRU 缓存。
+
+## 5、LinkedHashMap 和 HashMap 有什么区别？
+
+`LinkedHashMap` 和 `HashMap` 都是 Java 集合框架中的 Map 接口的实现类。它们的最大区别在于迭代元素的顺序。`HashMap` 迭代元素的顺序是不确定的，而 `LinkedHashMap` 提供了按照插入顺序或访问顺序迭代元素的功能。此外，`LinkedHashMap` 内部维护了一个双向链表，用于记录元素的插入顺序或访问顺序，而 `HashMap` 则没有这个链表。因此，`LinkedHashMap` 的插入性能可能会比 `HashMap` 略低，但它提供了更多的功能并且迭代效率相较于 `HashMap` 更加高效。
 
