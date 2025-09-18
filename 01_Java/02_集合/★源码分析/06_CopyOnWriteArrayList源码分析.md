@@ -33,7 +33,7 @@ JDK1.5 引入了 `Java.util.concurrent`（JUC）包，其中提供了很多线�
 
 # 二、CopyOnWriteArrayList 源码分析
 
-这里以 JDK1.8 为例，分析一下 `CopyOnWriteArrayList` 的底层核心源码。👀
+这里以 JDK1.8 为例，分析一下 `CopyOnWriteArrayList` 的底层核心源码。
 
 `CopyOnWriteArrayList` 的类定义如下：
 
@@ -73,6 +73,10 @@ public CopyOnWriteArrayList(Collection<? extends E> c) {
     else {
         elements = c.toArray();
         // c.toArray might (incorrectly) not return Object[] (see 6260652)
+        /**
+         * CopyOnWriteArrayList 内部需要一个 真正的 Object[] 来保存元素。
+		  *	如果拿到了 String[]、Integer[] 这种数组，后续操作（比如存储不同类型的对象）会出现 ArrayStoreException，违背了 			   * CopyOnWriteArrayList 的设计,因为它应该允许放任意类型的对象。
+        */
         if (elements.getClass() != Object[].class)
             elements = Arrays.copyOf(elements, elements.length, Object[].class);
     }
@@ -93,11 +97,12 @@ public CopyOnWriteArrayList(E[] toCopyIn) {
 * `add(int index, E element)`：在 `CopyOnWriteArrayList` 的指定位置插入元素。
 * `addIfAbsent(E e)`：如果指定元素不存在，那么添加该元素。如果成功添加元素则返回 true。
 
-这里以`add(E e)`为例进行介绍：
+这里以`add(E e)`为例进行介绍：👀
 
 ```java
 // 插入元素到 CopyOnWriteArrayList 的尾部
 public boolean add(E e) {
+    // 只有一个线程能持有 ReentrantLock类型的 lock，其他线程会阻塞在 lock.lock()，直到锁被释放。
     final ReentrantLock lock = this.lock;
     // 加锁
     lock.lock();
