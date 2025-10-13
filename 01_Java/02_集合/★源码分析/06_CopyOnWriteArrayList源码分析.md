@@ -134,7 +134,7 @@ public boolean add(E e) {
 
 > `Arrays.copyOf` 方法的时间复杂度是 O(n)，其中 n 表示需要复制的数组长度。因为这个方法的实现原理是先创建一个新的数组，然后将源数组中的数据复制到新数组中，最后返回新数组。这个方法会复制整个数组，因此其时间复杂度与数组长度成正比，即 O(n)。值得注意的是，由于底层调用了系统级别的拷贝指令，因此在实际应用中这个方法的性能表现比较优秀，但是也需要注意控制复制的数据量，避免出现内存占用过高的情况。
 
-## 3、读取元素👀
+## 3、读取元素
 
 `CopyOnWriteArrayList` 的读取操作是基于内部数组 `array` 并没有发生实际的修改，因此在读取操作时不需要进行同步控制和锁操作，可以保证数据的安全性。这种机制下，多个线程可以同时读取列表中的元素。
 
@@ -176,13 +176,13 @@ public int size() {
 }
 ```
 
-`CopyOnWriteArrayList`中的`array`数组每次复制都刚好能够容纳下所有元素，并不像`ArrayList`那样会预留一定的空间。因此，`CopyOnWriteArrayList`中并没有`size`属性`CopyOnWriteArrayList`的底层数组的长度就是元素个数，因此`size()`方法只要返回数组长度就可以了。
+`CopyOnWriteArrayList`中的`array`数组每次复制都**刚好能够容纳下所有元素**，并不像`ArrayList`那样会预留一定的空间。因此，`CopyOnWriteArrayList`中并没有`size`属性，`CopyOnWriteArrayList`的底层数组的长度就是元素个数，因此`size()`方法只要返回数组长度就可以了。
 
 ## 5、删除元素
 
 `CopyOnWriteArrayList`删除元素相关的方法一共有 4 个：
 
-1. `remove(int index)`：移除此列表中指定位置上的元素。将任何后续元素向左移动（从它们的索引中减去 1）。
+1. `E remove(int index)`：移除此列表中指定位置上的元素。将任何后续元素向左移动（从它们的索引中减去 1）。
 2. `boolean remove(Object o)`：删除此列表中首次出现的指定元素，如果不存在该元素则返回 false。
 3. `boolean removeAll(Collection<?> c)`：从此列表中删除指定集合中包含的所有元素。
 4. `void clear()`：移除此列表中的所有元素。
@@ -229,60 +229,60 @@ public E remove(int index) {
 
 `CopyOnWriteArrayList`提供了两个用于判断指定元素是否在列表中的方法：
 
-* `contains(Object o)`：判断是否包含指定元素。
-* `containsAll(Collection<?> c)`：判断是否保证指定集合的全部元素。
+* `boolean contains(Object o)`：判断是否包含指定元素。
+* `boolean containsAll(Collection<?> c)`：判断是否保证指定集合的全部元素。
 
 # 三、CopyOnWriteArrayList 常用方法测试
 
 代码：
 
 ```java
-// 创建一个 CopyOnWriteArrayList 对象
-CopyOnWriteArrayList<String> list = new CopyOnWriteArrayList<>();
+// 0.创建一个 CopyOnWriteArrayList 对象
+        CopyOnWriteArrayList<Integer> list = new CopyOnWriteArrayList<>();
 
-// 向列表中添加元素
-list.add("Java");
-list.add("Python");
-list.add("C++");
-System.out.println("初始列表：" + list);
+        // 1.向列表中添加元素
+        list.add(22);
+        list.add(33);
+        list.add(2233);
+        list.add(114514);
+        list.add(77);
+        list.add(88);
 
-// 使用 get 方法获取指定位置的元素
-System.out.println("列表第二个元素为：" + list.get(1));
+        System.out.println("1- 当前列表元素：" + list);
 
-// 使用 remove 方法删除指定元素
-boolean result = list.remove("C++");
-System.out.println("删除结果：" + result);
-System.out.println("列表删除元素后为：" + list);
+        // 2.通过 get() 获取指定下标元素
+        System.out.println("2- list中下标为1的元素是：" + list.get(1));
 
-// 使用 set 方法更新指定位置的元素
-list.set(1, "Golang");
-System.out.println("列表更新后为：" + list);
+        // 3.通过 remove() 移除指定下标或者指定元素
+        System.out.println("3- 移除list中下标为1的元素：" + list.remove(1));
+        System.out.println("3- 移除list中值为114514的元素的结果为：" + list.remove((Integer) 114514));
 
-// 使用 add 方法在指定位置插入元素
-list.add(0, "PHP");
-System.out.println("列表插入元素后为：" + list);
+        // 4.使用removeAll()删除指定集合中的元素
+        list.removeAll(Arrays.asList(11, 77, 88));
+        System.out.println("4- 移除list中值为77, 88的元素后list：" + list);
 
-// 使用 size 方法获取列表大小
-System.out.println("列表大小为：" + list.size());
+        // 5.使用 set() 方法更新指定下标元素
+        list.set(1,19260817);
+        System.out.println("5- 更新下标1的值后的集合为：" + list);
 
-// 使用 removeAll 方法删除指定集合中所有出现的元素
-result = list.removeAll(List.of("Java", "Golang"));
-System.out.println("批量删除结果：" + result);
-System.out.println("列表批量删除元素后为：" + list);
+        // 6.使用size()获取列表元素个数
+        System.out.println("6- 列表所含元素个数为：" + list.size());
 
-// 使用 clear 方法清空列表中所有元素
-list.clear();
-System.out.println("列表清空后为：" + list);
+        // 7.使用 clear() 清空列表
+        list.clear();
+        System.out.println("7- 清空列表后：" + list);
 ```
 
-输出：
+输出：👀
 
 ```java
-列表更新后为：[Java, Golang]
-列表插入元素后为：[PHP, Java, Golang]
-列表大小为：3
-批量删除结果：true
-列表批量删除元素后为：[PHP]
-列表清空后为：[]
+1- 当前列表元素：[22, 33, 2233, 114514, 77, 88]
+2- list中下标为1的元素是：33
+3- 移除list中下标为1的元素：33
+3- 移除list中值为114514的元素的结果为：true
+4- 移除list中值为77, 88的元素后list：[22, 2233]
+5- 更新下标1的值后的集合为：[22, 19260817]
+6- 列表所含元素个数为：2
+7- 清空列表后：[]
 ```
 
