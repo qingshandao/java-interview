@@ -647,7 +647,7 @@ public E poll(long timeout, TimeUnit unit) throws InterruptedException {
 
 同理，带有超时时间的 `poll` 也一样，队列为空则在规定时间内等待，若时间到了还是空的，则直接返回 null
 
-## 6.判断元素是否存在👀
+## 6.判断元素是否存在
 
 `ArrayBlockingQueue` 提供了 `contains(Object o)` 来判断指定元素是否存在于队列中。
 
@@ -687,16 +687,16 @@ public boolean contains(Object o) {
 
 新增元素：
 
-| 方法                                      | 队列满时处理方式                                         | 方法返回值 |
+| 方法                                      | 队列满 时处理方式                                        | 方法返回值 |
 | ----------------------------------------- | -------------------------------------------------------- | ---------- |
-| `put(E e)`                                | 线程阻塞，直到中断或被唤醒                               | void       |
+| `put(E e)`                                | 线程**阻塞**，直到中断或被唤醒                           | void       |
 | `offer(E e)`                              | 直接返回 false                                           | boolean    |
 | `offer(E e, long timeout, TimeUnit unit)` | 指定超时时间内阻塞，超过规定时间还未添加成功则返回 false | boolean    |
 | `add(E e)`                                | 直接抛出 `IllegalStateException` 异常                    | boolean    |
 
 获取/移除元素：
 
-| 方法                                | 队列空时处理方式                                    | 方法返回值 |
+| 方法                                | 队列空 时处理方式                                   | 方法返回值 |
 | ----------------------------------- | --------------------------------------------------- | ---------- |
 | `take()`                            | 线程阻塞，直到中断或被唤醒                          | E          |
 | `poll()`                            | 返回 null                                           | E          |
@@ -707,7 +707,8 @@ public boolean contains(Object o) {
 <img src="../assets/ArrayBlockingQueue-get-add-element-methods.png" style="zoom:80%;" />
 
 # 四、ArrayBlockingQueue 相关面试题
-## 1.ArrayBlockingQueue 是什么？它的特点是什么？
+
+## 1.ArrayBlockingQueue 是什么？它的特点是什么？👀
 
 `ArrayBlockingQueue` 是 `BlockingQueue` 接口的有界队列实现类，常用于多线程之间的数据共享，底层采用数组实现，从其名字就能看出来了。
 
@@ -716,6 +717,10 @@ public boolean contains(Object o) {
 为了保证线程安全，`ArrayBlockingQueue` 的并发控制采用可重入锁 `ReentrantLock` ，不管是插入操作还是读取操作，都需要获取到锁才能进行操作。并且，它还支持公平和非公平两种方式的锁访问机制，默认是非公平锁。
 
 `ArrayBlockingQueue` 虽名为阻塞队列，但也支持非阻塞获取和新增元素（例如 `poll()` 和 `offer(E e)` 方法），只是队列满时添加元素会抛出异常，队列为空时获取的元素为 null，一般不会使用。
+
+> ⚠为什么使用 可重入锁 `ReentrantLock` ？
+>
+> 
 
 ## 2.ArrayBlockingQueue 和 LinkedBlockingQueue 有什么区别？
 
