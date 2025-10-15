@@ -720,6 +720,23 @@ public boolean contains(Object o) {
 
 > ⚠为什么使用 可重入锁 `ReentrantLock` ？
 >
+> 🧩 **一、背景：`ArrayBlockingQueue` 的并发特性**
+>
+> `ArrayBlockingQueue` 是一个 **有界阻塞队列**，它在并发控制上有几个核心要求：
+>
+> 1. **线程安全**：入队 (`put`) 与出队 (`take`) 必须互斥访问共享数组。
+> 2. **可中断阻塞**：线程在队列满/空时需要 **阻塞等待**，并且能响应 `interrupt`。
+> 3. **高性能唤醒**：当队列状态变化（非空 / 非满）时，能准确唤醒等待线程。
+> 4. **公平性控制**：可通过构造函数指定锁的公平性（FIFO唤醒顺序）。
+>
+> 这些特性几乎决定了必须使用 **`ReentrantLock` + `Condition`** 来实现。
+>
+> **⚙️ 二、为什么选 `ReentrantLock`**
+>
+> ✅ 1. 支持条件变量（Condition）
+>
+> `ArrayBlockingQueue` 有两个重要的条件变量：
+>
 > 
 
 ## 2.ArrayBlockingQueue 和 LinkedBlockingQueue 有什么区别？
