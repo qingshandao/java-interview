@@ -708,7 +708,7 @@ public boolean contains(Object o) {
 
 # 四、ArrayBlockingQueue 相关面试题
 
-## 1.ArrayBlockingQueue 是什么？它的特点是什么？👀
+## 1.ArrayBlockingQueue 是什么？它的特点是什么？
 
 `ArrayBlockingQueue` 是 `BlockingQueue` 接口的有界队列实现类，常用于多线程之间的数据共享，底层采用数组实现，从其名字就能看出来了。
 
@@ -756,7 +756,7 @@ public boolean contains(Object o) {
 * 是否有界：`ArrayBlockingQueue` 是有界队列，必须在创建时指定容量大小，而 `ConcurrentLinkedQueue` 是无界队列，可以动态地增加容量。
 * 是否阻塞：`ArrayBlockingQueue` 支持阻塞和非阻塞两种获取和新增元素的方式（一般只会使用前者）， `ConcurrentLinkedQueue` 是无界的，仅支持非阻塞式获取和新增元素。
 
-## 4.ArrayBlockingQueue 的实现原理是什么？
+## 4.ArrayBlockingQueue 的实现原理是什么？👀
 
 `ArrayBlockingQueue` 的实现原理主要分为以下几点（这里以阻塞式获取和新增元素为例介绍）：
 
