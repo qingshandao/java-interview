@@ -261,28 +261,285 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >    import java.util.concurrent.FutureTask;
 >    
 >    class MyCallable implements Callable<String> {
+>        private final String taskName;
+>        
+>        public MyCallable(String taskName) {
+>            this.taskName = taskName;
+>        }
+>        
 >        @Override
 >        public String call() throws Exception {
->            Thread.sleep(1000); // 模拟耗时操作
->            return "执行完成，线程：" + Thread.currentThread().getName();
+>            System.out.println(taskName + " - 开始执行，线程：" + Thread.currentThread().getName());
+>            Thread.sleep(2000); // 模拟耗时操作
+>            System.out.println(taskName + " - 执行完成，线程：" + Thread.currentThread().getName());
+>            return "任务结果：" + taskName + "，执行线程：" + Thread.currentThread().getName();
 >        }
 >    }
 >    
 >    public class CallableExample {
 >        public static void main(String[] args) throws Exception {
->            MyCallable callable = new MyCallable();
->            FutureTask<String> futureTask = new FutureTask<>(callable);
->            Thread thread = new Thread(futureTask);
->            thread.start();
+>            System.out.println("主线程：" + Thread.currentThread().getName());
 >            
->            String result = futureTask.get(); // 获取返回值
->            System.out.println(result);
+>            // 创建Callable实例
+>            MyCallable callable1 = new MyCallable("任务1");
+>            MyCallable callable2 = new MyCallable("任务2");
+>            
+>            // 将Callable包装到FutureTask中
+>            FutureTask<String> futureTask1 = new FutureTask<>(callable1);
+>            FutureTask<String> futureTask2 = new FutureTask<>(callable2);
+>            
+>            System.out.println("FutureTask创建完成，此时call()方法还未执行");
+>            
+>            // 创建线程并启动
+>            Thread thread1 = new Thread(futureTask1, "工作线程1");
+>            Thread thread2 = new Thread(futureTask2, "工作线程2");
+>            
+>            System.out.println("开始启动线程...");
+>            long startTime = System.currentTimeMillis();
+>            
+>            thread1.start(); // 此时线程开始，但call()方法的执行取决于FutureTask的run()方法调用
+>            thread2.start();
+>            
+>            System.out.println("线程已启动，但此时call()方法仍在等待FutureTask.run()被调用");
+>            System.out.println("现在开始获取结果...");
+>            
+>            // 获取结果 - 这里会阻塞直到call()方法执行完成
+>            String result1 = futureTask1.get();
+>            String result2 = futureTask2.get();
+>            
+>            long endTime = System.currentTimeMillis();
+>            
+>            System.out.println("结果1：" + result1);
+>            System.out.println("结果2：" + result2);
+>            System.out.println("总耗时：" + (endTime - startTime) + "ms");
+>            
+>            // 演示异常情况
+>            System.out.println("\n--- 测试异常处理 ---");
+>            Callable<String> errorCallable = () -> {
+>                System.out.println("错误任务开始执行");
+>                Thread.sleep(500);
+>                throw new RuntimeException("模拟异常");
+>            };
+>            
+>            FutureTask<String> errorTask = new FutureTask<>(errorCallable);
+>            Thread errorThread = new Thread(errorTask);
+>            errorThread.start();
+>            
+>            try {
+>                String errorResult = errorTask.get(); // 异常在这里抛出
+>            } catch (Exception e) {
+>                System.out.println("捕获到任务执行异常：" + e.getCause().getMessage());
+>            }
 >        }
 >    }
 >    ```
 >
+>    > ❓ **疑问解答：**
+>    >
+>    > - **为什么用 `Callable` 创建线程需要先放入 `FutureTask` ？**
+>    >   - `Thread`类的构造函数只接受`Runnable`接口，而`Callable`是另一个接口
+>    >   - `FutureTask`实现了`Runnable`接口，同时又接受`Callable`作为参数
+>    >   - `FutureTask`起到桥梁作用，将`Callable`包装成`Runnable`，使其能被`Thread`执行
+>    > - **为什么thread.start()时不能获取返回值和触发异常，需要futureTask.get()才获取并触发异常？**
+>    >   - `thread.start()`只是启动线程，此时任务可能还在排队等待执行
+>    >   - `get()`方法会阻塞直到任务完成，并返回结果或抛出执行过程中发生的异常
+>    >   - 这种设计允许异步执行：启动线程后可以做其他事情，需要结果时再调用`get()`
+>    > - **call()方法是在thread.start()时执行，还是futureTask.get()时执行？**
+>    >   - `call()`方法实际上是在`FutureTask.run()`被调用时执行的
+>    >   - 而`FutureTask.run()`是在工作线程中被调用的，所以当线程调度执行FutureTask的run方法时，call()才会执行
+>    >   - 在上面的代码中，`thread.start()`后，call()方法会在工作线程中执行，如果`call()`还没执行完，`get()`会阻塞等待，如果`call()`已经执行完成，`get()`立即返回结果
+>
+> 4. 使用线程池
+>
+>    现代Java应用推荐使用线程池来管理线程：
+>
+>    ```java
+>    import java.util.concurrent.ExecutorService;
+>    import java.util.concurrent.Executors;
 >    
+>    public class ThreadPoolExample {
+>        public static void main(String[] args) {
+>            ExecutorService executor = Executors.newFixedThreadPool(3);
+>            
+>            for (int i = 0; i < 5; i++) {
+>                final int taskId = i;
+>                executor.submit(() -> {
+>                    System.out.println("任务 " + taskId + " 执行，线程：" + 
+>                                     Thread.currentThread().getName());
+>                    try {
+>                        Thread.sleep(1000);
+>                    } catch (InterruptedException e) {
+>                        Thread.currentThread().interrupt();
+>                    }
+>                });
+>            }
+>            
+>            executor.shutdown(); // 关闭线程池
+>        }
+>    }
+>    ```
+>
+> 5. 使用 CompletableFuture：
+>
+>    Java 8引入的异步编程工具：
+>
+>    ```java
+>    import java.util.concurrent.CompletableFuture;
+>    
+>    public class CompletableFutureExample {
+>        public static void main(String[] args) {
+>            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+>                try {
+>                    Thread.sleep(2000);
+>                    return "异步任务完成";
+>                } catch (InterruptedException e) {
+>                    Thread.currentThread().interrupt();
+>                    return "中断";
+>                }
+>            });
+>            
+>            future.thenAccept(System.out::println);
+>            
+>            // 主线程等待
+>            try {
+>                Thread.sleep(3000);
+>            } catch (InterruptedException e) {
+>                Thread.currentThread().interrupt();
+>            }
+>        }
+>    }
+>    ```
+>
+> 6. 使用匿名内部类和Lambda表达式
+>
+>    现代Java中常用的方式：
+>
+>    ```java
+>    public class LambdaThreadExample {
+>        public static void main(String[] args) {
+>            // 使用Lambda表达式
+>            Thread lambdaThread = new Thread(() -> {
+>                System.out.println("Lambda线程执行");
+>            });
+>            lambdaThread.start();
+>            
+>            // 使用匿名内部类
+>            Thread anonymousThread = new Thread(new Runnable() {
+>                @Override
+>                public void run() {
+>                    System.out.println("匿名内部类线程执行");
+>                }
+>            });
+>            anonymousThread.start();
+>        }
+>    }
+>    ```
+>
+> 🔎总结：虽然它们的底层实现都依赖于`new Thread().start()`，每种方式都有其适用场景：
+>
+> - **继承Thread**: 简单直接，但限制了类的继承
+> - **实现Runnable**: 更灵活，推荐使用
+> - **实现Callable**: 需要返回值时使用
+> - **线程池**: 生产环境推荐，更好的资源管理
+> - **CompletableFuture**: 异步编程，链式调用
+>
+> ⚠️注意：创建线程时，重写任务方法（例如 run() ）和 最后启动任务的方法（ start() ）并不相同
+>
+> - **`run()`方法可以被多次调用**，因为它本质上是一个普通的类方法，能被正常调用
+>
+> - **每次调用`run()`都在当前线程中同步执行**，不会创建新线程
+>
+> - **多次调用`run()`是顺序执行的**，不提供并发能力
+>
+> - **`start()`方法只能调用一次**，因为一个线程对象只能对应一个操作系统线程
+>
+>   ```java
+>   class CountingThread extends Thread {
+>       private static int executionCount = 0;
+>       
+>       @Override
+>       public void run() {
+>           executionCount++;
+>           System.out.println("第" + executionCount + "次执行run()方法，线程：" + 
+>                             Thread.currentThread().getName() + "，时间：" + 
+>                             System.currentTimeMillis());
+>           
+>           try {
+>               Thread.sleep(1000); // 模拟耗时操作
+>           } catch (InterruptedException e) {
+>               System.out.println("线程被中断");
+>           }
+>           
+>           System.out.println("第" + executionCount + "次run()方法执行完毕");
+>       }
+>   }
+>   
+>   public class RunMethodMultipleCalls {
+>       public static void main(String[] args) throws InterruptedException {
+>           CountingThread thread = new CountingThread();
+>           
+>           System.out.println("=== 主线程中多次调用run()方法 ===");
+>           System.out.println("主线程：" + Thread.currentThread().getName());
+>           
+>           // 第一次调用run() - 在主线程中执行
+>           System.out.println("\n第一次调用run()：");
+>           long start1 = System.currentTimeMillis();
+>           thread.run();
+>           long end1 = System.currentTimeMillis();
+>           System.out.println("第一次run()执行耗时：" + (end1 - start1) + "ms");
+>           
+>           // 第二次调用run() - 仍在主线程中执行
+>           System.out.println("\n第二次调用run()：");
+>           long start2 = System.currentTimeMillis();
+>           thread.run();
+>           long end2 = System.currentTimeMillis();
+>           System.out.println("第二次run()执行耗时：" + (end2 - start2) + "ms");
+>           
+>           // 第三次调用run() - 仍在主线程中执行
+>           System.out.println("\n第三次调用run()：");
+>           long start3 = System.currentTimeMillis();
+>           thread.run();
+>           long end3 = System.currentTimeMillis();
+>           System.out.println("第三次run()执行耗时：" + (end3 - start3) + "ms");
+>           
+>           System.out.println("\n=== 对比：使用start()方法启动线程 ===");
+>           
+>           // 创建新线程对象用于start()测试
+>           CountingThread threadForStart = new CountingThread();
+>           System.out.println("\n调用start()方法：");
+>           long start4 = System.currentTimeMillis();
+>           threadForStart.start(); // 启动新线程
+>           // 注意：这里不会等待线程完成，立即继续执行
+>           System.out.println("start()调用后立即继续，时间差：" + 
+>                             (System.currentTimeMillis() - start4) + "ms");
+>           
+>           // 等待线程完成
+>           threadForStart.join();
+>           
+>           System.out.println("\n=== 总结 ===");
+>           System.out.println("1. run()方法可以被多次调用（就像普通方法）");
+>           System.out.println("2. 每次调用run()都在当前线程中同步执行");
+>           System.out.println("3. start()只能调用一次，且会创建新线程");
+>           System.out.println("4. 直接调用run()无法实现多线程并发");
+>           
+>           // 展示线程状态变化
+>           System.out.println("\n=== 线程状态演示 ===");
+>           Thread stateDemo = new Thread(() -> {
+>               System.out.println("线程正在运行");
+>           });
+>           
+>           System.out.println("新建线程状态：" + stateDemo.getState());
+>           stateDemo.start();
+>           System.out.println("启动后线程状态：" + stateDemo.getState());
+>           stateDemo.join();
+>           System.out.println("完成后线程状态：" + stateDemo.getState());
+>       }
+>   }
+>   ```
+>
+>   
 
 不过，这些方式其实并没有真正创建出线程。准确点来说，这些都属于是在 Java 代码中使用多线程的方法。
 
 严格来说，Java 就只有一种方式可以创建线程，那就是通过`new Thread().start()`创建。不管是哪种方式，最终还是依赖于`new Thread().start()`
+
