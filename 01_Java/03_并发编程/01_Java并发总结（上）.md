@@ -36,69 +36,69 @@
 >    *    虚拟机栈（VM Stack）：存储局部变量表、操作数栈、动态链接等
 >    *    本地方法栈（Native Method Stack）：为本地方法服务
 >    */
->   
+>     
 >   public class ThreadMemoryModelDemo {
 >       // 方法区资源：类的静态变量
 >       private static int staticCounter = 5;
->       
+>         
 >       // 堆资源：实例变量（对象的一部分）
 >       private String objectName;
->       
+>         
 >       public ThreadMemoryModelDemo(String name) {
 >           this.objectName = name;
 >       }
->       
+>         
 >       // 方法区资源：方法字节码
 >       public void sharedMethod() {
 >           // 以下变量存储在线程私有的虚拟机栈中
 >           int localVar = 10;           // 局部变量
 >           String localRef = "test";    // 局部引用
->           
+>             
 >           // 访问共享的堆资源
 >           System.out.println(this.objectName);
->           
+>             
 >           // 访问共享的方法区资源
 >           System.out.println("Static counter: " + staticCounter);
 >       }
->       
+>         
 >       // 演示多线程共享资源
 >       public static void demonstrateSharedResource() {
 >           ThreadMemoryModelDemo demo1 = new ThreadMemoryModelDemo("Thread-1");
 >           ThreadMemoryModelDemo demo2 = new ThreadMemoryModelDemo("Thread-2");
->           
+>             
 >           // 创建多个线程执行相同任务
 >           Runnable task = () -> {
 >               // 每个线程有自己的程序计数器，记录执行位置
 >               // 每个线程有自己的虚拟机栈，localVar存储在这里
->               
+>                 
 >               // 但访问相同的共享资源
 >               demo1.sharedMethod();  // 访问堆中的对象
 >               System.out.println("Static value accessed by thread: " + staticCounter); // 方法区资源
 >           };
->           
+>             
 >           Thread t1 = new Thread(task, "Thread-1");
 >           Thread t2 = new Thread(task, "Thread-2");
->           
+>             
 >           t1.start();
 >           t2.start();
 >       }
->       
+>         
 >       public static void main(String[] args) {
 >           System.out.println("=== Java线程内存模型说明 ===\n");
->           
+>             
 >           System.out.println("1. 同类的多个线程：");
 >           System.out.println("   - 通过相同方式创建的多个线程实例");
 >           System.out.println("   - 例如：多个Thread实例执行相同任务\n");
->           
+>             
 >           System.out.println("2. 共享资源：");
 >           System.out.println("   - 堆（Heap）：存储所有对象实例，所有线程共享");
 >           System.out.println("   - 方法区（Method Area）：存储类元数据、静态变量、常量池等\n");
->           
+>             
 >           System.out.println("3. 线程私有资源：");
 >           System.out.println("   - 程序计数器：记录线程执行位置，线程切换时保持状态");
 >           System.out.println("   - 虚拟机栈：存储方法调用的局部变量和操作栈");
 >           System.out.println("   - 本地方法栈：支持native方法执行\n");
->           
+>             
 >           demonstrateSharedResource();
 >       }
 >   }
@@ -222,7 +222,7 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >            System.out.println("线程执行：" + Thread.currentThread().getName());
 >        }
 >    }
->    
+>
 >    public class ThreadExample {
 >        public static void main(String[] args) {
 >            MyThread thread = new MyThread();
@@ -242,7 +242,7 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >            System.out.println("Runnable线程执行：" + Thread.currentThread().getName());
 >        }
 >    }
->    
+>
 >    public class RunnableExample {
 >        public static void main(String[] args) {
 >            MyRunnable runnable = new MyRunnable();
@@ -252,7 +252,7 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >    }
 >    ```
 >
-> 3. 实现Callable接口
+> 3. 实现 `Callable` 接口
 >
 >    这种方式可以返回结果，并抛出异常：
 >
@@ -262,11 +262,11 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >    
 >    class MyCallable implements Callable<String> {
 >        private final String taskName;
->        
+>    
 >        public MyCallable(String taskName) {
 >            this.taskName = taskName;
 >        }
->        
+>    
 >        @Override
 >        public String call() throws Exception {
 >            System.out.println(taskName + " - 开始执行，线程：" + Thread.currentThread().getName());
@@ -279,40 +279,40 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >    public class CallableExample {
 >        public static void main(String[] args) throws Exception {
 >            System.out.println("主线程：" + Thread.currentThread().getName());
->            
+>    
 >            // 创建Callable实例
 >            MyCallable callable1 = new MyCallable("任务1");
 >            MyCallable callable2 = new MyCallable("任务2");
->            
+>    
 >            // 将Callable包装到FutureTask中
 >            FutureTask<String> futureTask1 = new FutureTask<>(callable1);
 >            FutureTask<String> futureTask2 = new FutureTask<>(callable2);
->            
+>    
 >            System.out.println("FutureTask创建完成，此时call()方法还未执行");
->            
+>    
 >            // 创建线程并启动
 >            Thread thread1 = new Thread(futureTask1, "工作线程1");
 >            Thread thread2 = new Thread(futureTask2, "工作线程2");
->            
+>    
 >            System.out.println("开始启动线程...");
 >            long startTime = System.currentTimeMillis();
->            
+>    
 >            thread1.start(); // 此时线程开始，但call()方法的执行取决于FutureTask的run()方法调用
 >            thread2.start();
->            
+>    
 >            System.out.println("线程已启动，但此时call()方法仍在等待FutureTask.run()被调用");
 >            System.out.println("现在开始获取结果...");
->            
+>    
 >            // 获取结果 - 这里会阻塞直到call()方法执行完成
 >            String result1 = futureTask1.get();
 >            String result2 = futureTask2.get();
->            
+>    
 >            long endTime = System.currentTimeMillis();
->            
+>    
 >            System.out.println("结果1：" + result1);
 >            System.out.println("结果2：" + result2);
 >            System.out.println("总耗时：" + (endTime - startTime) + "ms");
->            
+>    
 >            // 演示异常情况
 >            System.out.println("\n--- 测试异常处理 ---");
 >            Callable<String> errorCallable = () -> {
@@ -320,11 +320,11 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >                Thread.sleep(500);
 >                throw new RuntimeException("模拟异常");
 >            };
->            
+>    
 >            FutureTask<String> errorTask = new FutureTask<>(errorCallable);
 >            Thread errorThread = new Thread(errorTask);
 >            errorThread.start();
->            
+>    
 >            try {
 >                String errorResult = errorTask.get(); // 异常在这里抛出
 >            } catch (Exception e) {
@@ -337,30 +337,70 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >    > ❓ **疑问解答：**
 >    >
 >    > - **为什么用 `Callable` 创建线程需要先放入 `FutureTask` ？**
+>    >   
 >    >   - `Thread`类的构造函数只接受`Runnable`接口，而`Callable`是另一个接口
 >    >   - `FutureTask`实现了`Runnable`接口，同时又接受`Callable`作为参数
 >    >   - `FutureTask`起到桥梁作用，将`Callable`包装成`Runnable`，使其能被`Thread`执行
+>    >   
 >    > - **为什么thread.start()时不能获取返回值和触发异常，需要futureTask.get()才获取并触发异常？**
+>    >   
 >    >   - `thread.start()`只是启动线程，此时任务可能还在排队等待执行
 >    >   - `get()`方法会阻塞直到任务完成，并返回结果或抛出执行过程中发生的异常
 >    >   - 这种设计允许异步执行：启动线程后可以做其他事情，需要结果时再调用`get()`
+>    >   
 >    > - **call()方法是在thread.start()时执行，还是futureTask.get()时执行？**
 >    >   - `call()`方法实际上是在`FutureTask.run()`被调用时执行的
 >    >   - 而`FutureTask.run()`是在工作线程中被调用的，所以当线程调度执行FutureTask的run方法时，call()才会执行
 >    >   - 在上面的代码中，`thread.start()`后，call()方法会在工作线程中执行，如果`call()`还没执行完，`get()`会阻塞等待，如果`call()`已经执行完成，`get()`立即返回结果
+>    >   
+>    > - `Runnable` 与 `Callable` 接口的区别
+>    >
+>    >   - 核心区别
+>    >
+>    >     | 对比点   | Runnable          | Callable            |
+>    >     | -------- | ----------------- | ------------------- |
+>    >     | 返回值   | ❌ 无              | ✅ 有（泛型）        |
+>    >     | 抛出异常 | ❌ 不能直接抛      | ✅ 可以抛异常        |
+>    >     | 使用方式 | Thread / Executor | Executor + Future   |
+>    >     | 引入版本 | Java 1.0          | Java 1.5（并发包）  |
+>    >     | 适合场景 | 简单任务          | 有结果/需要异步计算 |
+>    >
+>    >   - `Runnable`：最基础的线程任务
+>    >
+>    >     📌 特点
+>    >
+>    >     - 只有一个方法：`run()`
+>    >     - 没有返回值
+>    >     - 不能抛 checked 异常（只能 try-catch）
+>    >
+>    >   - `Callable`：带返回值的任务
+>    >
+>    >      📌 特点
+>    >
+>    >     - 方法：`call()`
+>    >
+>    >     - 有返回值（泛型）
+>    >
+>    >     - 可以抛异常
+>    >
+>    >     - 通常配合 `Future` 使用，用来获取异步执行结果
+>    >
+>    >       > 👉 `future.get()`：会**阻塞等待结果返回**
+>    >
+>    >       
 >
 > 4. 使用线程池
 >
->    现代Java应用推荐使用线程池来管理线程：
+>    现代 Java应用推荐使用**线程池**来管理线程：
 >
 >    ```java
 >    import java.util.concurrent.ExecutorService;
 >    import java.util.concurrent.Executors;
->    
+>
 >    public class ThreadPoolExample {
 >        public static void main(String[] args) {
 >            ExecutorService executor = Executors.newFixedThreadPool(3);
->            
+>
 >            for (int i = 0; i < 5; i++) {
 >                final int taskId = i;
 >                executor.submit(() -> {
@@ -373,7 +413,7 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >                    }
 >                });
 >            }
->            
+>
 >            executor.shutdown(); // 关闭线程池
 >        }
 >    }
@@ -385,7 +425,7 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >
 >    ```java
 >    import java.util.concurrent.CompletableFuture;
->    
+>
 >    public class CompletableFutureExample {
 >        public static void main(String[] args) {
 >            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
@@ -397,9 +437,9 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >                    return "中断";
 >                }
 >            });
->            
+>
 >            future.thenAccept(System.out::println);
->            
+>
 >            // 主线程等待
 >            try {
 >                Thread.sleep(3000);
@@ -422,7 +462,7 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >                System.out.println("Lambda线程执行");
 >            });
 >            lambdaThread.start();
->            
+>    
 >            // 使用匿名内部类
 >            Thread anonymousThread = new Thread(new Runnable() {
 >                @Override
@@ -456,20 +496,20 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >   ```java
 >   class CountingThread extends Thread {
 >       private static int executionCount = 0;
->       
+>   
 >       @Override
 >       public void run() {
 >           executionCount++;
 >           System.out.println("第" + executionCount + "次执行run()方法，线程：" + 
 >                             Thread.currentThread().getName() + "，时间：" + 
 >                             System.currentTimeMillis());
->           
+>   
 >           try {
 >               Thread.sleep(1000); // 模拟耗时操作
 >           } catch (InterruptedException e) {
 >               System.out.println("线程被中断");
 >           }
->           
+>   
 >           System.out.println("第" + executionCount + "次run()方法执行完毕");
 >       }
 >   }
@@ -477,33 +517,33 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >   public class RunMethodMultipleCalls {
 >       public static void main(String[] args) throws InterruptedException {
 >           CountingThread thread = new CountingThread();
->           
+>   
 >           System.out.println("=== 主线程中多次调用run()方法 ===");
 >           System.out.println("主线程：" + Thread.currentThread().getName());
->           
+>   
 >           // 第一次调用run() - 在主线程中执行
 >           System.out.println("\n第一次调用run()：");
 >           long start1 = System.currentTimeMillis();
 >           thread.run();
 >           long end1 = System.currentTimeMillis();
 >           System.out.println("第一次run()执行耗时：" + (end1 - start1) + "ms");
->           
+>   
 >           // 第二次调用run() - 仍在主线程中执行
 >           System.out.println("\n第二次调用run()：");
 >           long start2 = System.currentTimeMillis();
 >           thread.run();
 >           long end2 = System.currentTimeMillis();
 >           System.out.println("第二次run()执行耗时：" + (end2 - start2) + "ms");
->           
+>   
 >           // 第三次调用run() - 仍在主线程中执行
 >           System.out.println("\n第三次调用run()：");
 >           long start3 = System.currentTimeMillis();
 >           thread.run();
 >           long end3 = System.currentTimeMillis();
 >           System.out.println("第三次run()执行耗时：" + (end3 - start3) + "ms");
->           
+>   
 >           System.out.println("\n=== 对比：使用start()方法启动线程 ===");
->           
+>   
 >           // 创建新线程对象用于start()测试
 >           CountingThread threadForStart = new CountingThread();
 >           System.out.println("\n调用start()方法：");
@@ -512,22 +552,22 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >           // 注意：这里不会等待线程完成，立即继续执行
 >           System.out.println("start()调用后立即继续，时间差：" + 
 >                             (System.currentTimeMillis() - start4) + "ms");
->           
+>   
 >           // 等待线程完成
 >           threadForStart.join();
->           
+>   
 >           System.out.println("\n=== 总结 ===");
 >           System.out.println("1. run()方法可以被多次调用（就像普通方法）");
 >           System.out.println("2. 每次调用run()都在当前线程中同步执行");
 >           System.out.println("3. start()只能调用一次，且会创建新线程");
 >           System.out.println("4. 直接调用run()无法实现多线程并发");
->           
+>   
 >           // 展示线程状态变化
 >           System.out.println("\n=== 线程状态演示 ===");
 >           Thread stateDemo = new Thread(() -> {
 >               System.out.println("线程正在运行");
 >           });
->           
+>   
 >           System.out.println("新建线程状态：" + stateDemo.getState());
 >           stateDemo.start();
 >           System.out.println("启动后线程状态：" + stateDemo.getState());
@@ -537,9 +577,22 @@ JDK 1.2 之前，Java 线程是基于绿色线程（Green Threads）实现的，
 >   }
 >   ```
 >
->   
+> 
 
 不过，这些方式其实并没有真正创建出线程。准确点来说，这些都属于是在 Java 代码中使用多线程的方法。
 
 严格来说，Java 就只有一种方式可以创建线程，那就是通过`new Thread().start()`创建。不管是哪种方式，最终还是依赖于`new Thread().start()`
+
+### 4.1 ⭐️说说线程的生命周期和状态?
+
+Java 线程在运行的生命周期中的指定时刻只可能处于下面 6 种不同状态的其中一个状态：
+
+- NEW: 初始状态，线程被创建出来但没有被调用 `start()` 。
+- RUNNABLE: 运行状态，线程被调用了 `start()`等待运行的状态。
+- BLOCKED：阻塞状态，需要等待锁释放。
+- WAITING：等待状态，表示该线程需要等待其他线程做出一些特定动作（通知或中断）。
+- TIME_WAITING：超时等待状态，可以在指定的时间后自行返回而不是像 WAITING 那样一直等待。
+- TERMINATED：终止状态，表示该线程已经运行完毕。
+
+线程在生命周期中并不是固定处于某一个状态而是随着代码的执行在不同状态之间切换。
 
