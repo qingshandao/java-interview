@@ -1140,3 +1140,78 @@ Thread[线程 2,5,main]waiting get resource1
 3. **不剥夺条件**：线程已获得的资源在未使用完之前不能被其他线程强行剥夺，只有自己使用完毕后才释放资源。
 4. **循环等待条件**：若干线程之间形成一种头尾相接的循环等待资源关系。
 
+## 2、如何检测死锁？
+
+- 使用`jmap`、`jstack`等命令查看 JVM 线程栈和堆内存的情况。如果有死锁，`jstack` 的输出中通常会有 `Found one Java-level deadlock:`的字样，后面会跟着死锁相关的线程信息。另外，实际项目中还可以搭配使用`top`、`df`、`free`等命令查看操作系统的基本情况，出现死锁可能会导致 CPU、内存等资源消耗过高。
+- 采用 VisualVM、JConsole 等工具进行排查。
+
+这里以 JConsole 工具为例进行演示。
+
+首先，我们要找到 JDK 的 bin 目录，找到 jconsole 并双击打开。
+
+![](./assets/jdk-home-bin-jconsole.png)
+
+对于 MAC 用户来说，可以通过 `/usr/libexec/java_home -V`查看 JDK 安装目录，找到后通过 `open . + 文件夹地址`打开即可。例如，我本地的某个 JDK 的路径是：
+
+
+
+```bash
+ open . /Users/guide/Library/Java/JavaVirtualMachines/corretto-1.8.0_252/Contents/Home
+```
+
+打开 jconsole 后，连接对应的程序，然后进入线程界面选择检测死锁即可！
+
+![](./assets/jconsole-check-deadlock.png)
+
+![](./assets/jconsole-check-deadlock-done.png)
+
+## 3、如何预防和避免线程死锁?
+
+**如何预防死锁？** 破坏死锁的产生的必要条件即可：
+
+1. **破坏请求与保持条件**：一次性申请所有的资源。
+2. **破坏不剥夺条件**：占用部分资源的线程进一步申请其他资源时，如果申请不到，可以主动释放它占有的资源。
+3. **破坏循环等待条件**：靠按序申请资源来预防。按某一顺序申请资源，释放资源则反序释放。破坏循环等待条件。
+
+**如何避免死锁？**
+
+避免死锁就是在资源分配时，借助于算法（比如银行家算法）对资源分配进行计算评估，使其进入安全状态。
+
+> **安全状态** 指的是系统能够按照某种线程推进顺序（P1、P2、P3……Pn）来为每个线程分配所需资源，直到满足每个线程对资源的最大需求，使每个线程都可顺利完成。称 `<P1、P2、P3.....Pn>` 序列为安全序列。
+
+我们对线程 2 的代码修改成下面这样就不会产生死锁了。
+
+```java
+new Thread(() -> {
+            synchronized (resource1) {
+                System.out.println(Thread.currentThread() + "get resource1");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(Thread.currentThread() + "waiting get resource2");
+                synchronized (resource2) {
+                    System.out.println(Thread.currentThread() + "get resource2");
+                }
+            }
+        }, "线程 2").start();
+```
+
+输出：
+
+```java
+Thread[线程 1,5,main]get resource1
+Thread[线程 1,5,main]waiting get resource2
+Thread[线程 1,5,main]get resource2
+Thread[线程 2,5,main]get resource1
+Thread[线程 2,5,main]waiting get resource2
+Thread[线程 2,5,main]get resource2
+
+Process finished with exit code 0
+```
+
+我们分析一下上面的代码为什么避免了死锁的发生?
+
+线程 1 首先获得到 resource1 的监视器锁,这时候线程 2 就获取不到了。然后线程 1 再去获取 resource2 的监视器锁，可以获取到。然后线程 1 释放了对 resource1、resource2 的监视器锁的占用，线程 2 获取到就可以执行了。这样就破坏了循环等待条件，因此避免了死锁。
+
