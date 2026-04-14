@@ -6,6 +6,11 @@
 - [ ] XML相应与读取
 - [ ] JSON数据的读取、解析、返回前端
 
+# 2026-04-14
+
+- [ ] Java并发（中）的 volatile 与 happens-before 的关系 在 JMM详解 篇之后重看
+- [ ] 
+
 
 
 # ES
