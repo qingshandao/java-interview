@@ -1207,3 +1207,599 @@ CAS 操作仅能对单个共享变量有效。当需要操作多个共享变量�
 | **Java 代表类** | `AtomicInteger`、`LongAdder`、`StampedLock` | `synchronized`、`ReentrantLock`              |
 | **适用场景**    | **多读少写**、并发冲突概率低的业务。        | **多写少读**、数据一致性要求极高的核心业务。 |
 
+# 三、synchronized 关键字
+
+## 1、synchronized 是什么？有什么用？
+
+`synchronized` 是 Java 中的一个关键字，翻译成中文是同步的意思，主要解决的是多个线程之间访问资源的同步性，可以保证被它修饰的 **方法** 或者 **代码块** 在任意时刻只能有一个线程执行。
+
+在 Java 早期版本中，`synchronized` 属于 **重量级锁**，效率低下。这是因为监视器锁（monitor）是依赖于底层的操作系统的 `Mutex Lock` 来实现的，Java 的线程是映射到操作系统的原生线程之上的。如果要挂起或者唤醒一个线程，都需要操作系统帮忙完成，而操作系统实现线程之间的切换时需要从用户态转换到内核态，这个状态之间的转换需要相对比较长的时间，时间成本相对较高。
+
+不过，在 Java 6 之后， `synchronized` 引入了大量的优化如自旋锁、适应性自旋锁、锁消除、锁粗化、偏向锁、轻量级锁等技术来减少锁操作的开销，这些优化让 `synchronized` 锁的效率提升了很多。因此， `synchronized` 还是可以在实际项目中使用的，像 JDK 源码、很多开源框架都大量使用了 `synchronized` 。
+
+关于偏向锁多补充一点：由于偏向锁增加了 JVM 的复杂性，同时也并没有为所有应用都带来性能提升。因此，在 JDK15 中，偏向锁被默认关闭（仍然可以使用 `-XX:+UseBiasedLocking` 启用偏向锁），在 JDK18 中，偏向锁已经被彻底废弃（无法通过命令行打开）。
+
+## 2、如何使用 synchronized？
+
+`synchronized` 关键字的使用方式主要有下面 3 种：
+
+1. 修饰实例方法
+2. 修饰静态方法
+3. 修饰代码块
+
+**1、修饰实例方法** （锁当前对象实例）
+
+给当前对象实例加锁，进入同步代码前要获得 **当前对象实例的锁** 。
+
+```java
+synchronized void method() {
+    //业务代码
+}
+```
+
+>  **案例**
+>
+> ```java
+> public class SyncDemo {
+> 
+>     public synchronized void instanceMethod() {
+>         System.out.println(Thread.currentThread().getName() + " -> instanceMethod start");
+>         try { Thread.sleep(2000); } catch (InterruptedException e) {}
+>         System.out.println(Thread.currentThread().getName() + " -> instanceMethod end");
+>     }
+> 
+>     public static void main(String[] args) {
+>         SyncDemo obj1 = new SyncDemo();
+>         SyncDemo obj2 = new SyncDemo();
+> 
+>         // 两个线程访问同一个对象 → 互斥
+>         new Thread(obj1::instanceMethod, "T1").start();
+>         new Thread(obj1::instanceMethod, "T2").start();
+> 
+>         // 两个线程访问不同对象 → 不互斥
+>         new Thread(obj2::instanceMethod, "T3").start();
+>     }
+> }
+> 
+> // 运行结果
+> T1 -> instanceMehtod start
+> T2 -> instanceMehtod start
+> T2 -> instanceMethod end
+> T1 -> instanceMethod end
+> T3 -> instanceMehtod start
+> T3 -> instanceMethod end
+> ```
+>
+> 👉 结论：
+>
+> - **同一个对象：互斥**
+> - **不同对象：不互斥**
+
+**2、修饰静态方法** （锁当前类）
+
+给当前类加锁，会作用于类的所有对象实例 ，进入同步代码前要获得 **当前 class 的锁**。
+
+这是因为静态成员不属于任何一个实例对象，归整个类所有，不依赖于类的特定实例，被类的所有实例共享。
+
+```java
+synchronized static void method() {
+    //业务代码
+}
+```
+
+静态 `synchronized` 方法和非静态 `synchronized` 方法之间的调用互斥么？不互斥！如果一个线程 A 调用一个实例对象的非静态 `synchronized` 方法，而线程 B 需要调用这个实例对象所属类的静态 `synchronized` 方法，是允许的，不会发生互斥现象，因为访问静态 `synchronized` 方法占用的锁是当前类的锁，而访问非静态 `synchronized` 方法占用的锁是当前实例对象锁。
+
+> **案例1：静态方法之间互斥**
+>
+> ```java
+> public class SyncDemo {
+> 
+>     public static synchronized void staticMethod() {
+>         System.out.println(Thread.currentThread().getName() + " -> staticMethod start");
+>         try { Thread.sleep(2000); } catch (InterruptedException e) {}
+>         System.out.println(Thread.currentThread().getName() + " -> staticMethod end");
+>     }
+> 
+>     public static void main(String[] args) {
+>         SyncDemo obj1 = new SyncDemo();
+>         SyncDemo obj2 = new SyncDemo();
+> 
+>         // 不同对象调用，但锁是同一个 Class
+>         new Thread(() -> ClassSyncDemo.staticMehtod(), "T1").start();
+>         new Thread(ClassSyncDemo::staticMehtod, "T2").start();
+>         new Thread(ClassSyncDemo::staticMehtod, "T3").start();
+>     }
+> }
+> 
+> // 运行结果
+> T1 -> staticMethod start
+> T1 -> staticMethod end
+> T3 -> staticMethod start
+> T3 -> staticMethod end
+> T2 -> staticMethod start
+> T2 -> staticMethod end
+> ```
+>
+> 👉 结论：
+>
+> - **无论多少实例，static synchronized 都是同一把锁（类锁）**
+>
+> 案例2：静态方法和非静态方法不互斥
+>
+> ```java
+> public class SyncDemo {
+> 
+>     public synchronized void instanceMethod() {
+>         System.out.println("instanceMethod");
+>         try { Thread.sleep(2000); } catch (InterruptedException e) {}
+>     }
+> 
+>     public static synchronized void staticMethod() {
+>         System.out.println("staticMethod");
+>         try { Thread.sleep(2000); } catch (InterruptedException e) {}
+>     }
+> 
+>     public static void main(String[] args) {
+>         SyncDemo obj = new SyncDemo();
+> 
+>         new Thread(obj::instanceMethod).start();
+>         new Thread(SyncDemo::staticMethod).start();
+>     }
+> }
+> ```
+>
+> 👉 现象：
+>
+> - 两个方法**同时执行**
+> - 没有阻塞
+>
+> 👉 原因：
+>
+> - 一个锁的是 **obj**
+> - 一个锁的是 **SyncDemo.class**
+
+**3、修饰代码块** （锁指定对象/类）
+
+对括号里指定的对象/类加锁：
+
+- `synchronized(object)` 表示进入同步代码块前要获得 **给定对象的锁**。
+- `synchronized(类.class)` 表示进入同步代码块前要获得 **给定 Class 的锁**
+
+```java
+synchronized(this) {
+    //业务代码
+}
+```
+
+> **案例**
+>
+> ✔ 锁当前对象（等价于实例方法）
+>
+> ```java
+> public void method() {
+>     synchronized (this) {
+>         System.out.println(Thread.currentThread().getName() + " -> this lock");
+>     }
+> }
+> ```
+>
+> ✔ 锁类（等价于 static synchronized）
+>
+> ```java
+> public void method() {
+>     synchronized (SyncDemo.class) {
+>         System.out.println(Thread.currentThread().getName() + " -> class lock");
+>     }
+> }
+> ```
+>
+> ✔ 锁自定义对象（推荐精细控制）
+>
+> ```java
+> private final Object lock = new Object();
+> 
+> public void method() {
+>     synchronized (lock) {
+>         System.out.println(Thread.currentThread().getName() + " -> custom lock");
+>     }
+> }
+> ```
+>
+> 
+
+**总结：**
+
+- `synchronized` 关键字加到 `static` 静态方法和 `synchronized(class)` 代码块上都是是给 Class 类上锁；
+
+- `synchronized` 关键字加到实例方法上是给对象实例上锁；
+
+- 尽量不要使用 `synchronized(String a)` 因为 JVM 中，字符串常量池具有缓存功能。
+
+  > ```java
+  > String lock = "abc";
+  > 
+  > synchronized (lock) {
+  >     // ❌ 可能被其他地方共享
+  > }
+  > ```
+  >
+  > 👉 原因：
+  >
+  > - 字符串在 **字符串常量池**
+  > - `"abc"` 可能全局唯一 → 被别的代码锁住
+
+- ⚠常见问题
+
+  - ⚠️ 1. 锁错对象（最常见 bug）
+
+    ```java
+    public void method() {
+        synchronized (new Object()) {
+            // ❌ 每次都是新对象 → 根本没锁住
+        }
+    }
+    ```
+
+    👉 等价于：没加锁
+
+  - ⚠️ 2. 使用 String 作为锁
+
+    ```java
+    String lock = "abc";
+    
+    synchronized (lock) {
+        // ❌ 可能被其他地方共享
+    }
+    ```
+
+    👉 原因：
+
+    - 字符串在 **字符串常量池**
+    - `"abc"` 可能全局唯一 → 被别的代码锁住
+
+  - ⚠️ 3. 锁粒度过大（性能问题）
+
+    ```java
+    public synchronized void bigMethod() {
+        // 大量业务逻辑
+    }
+    ```
+
+    👉 问题：
+
+    - 所有线程排队 → 性能下降
+
+    ✔ 优化：
+
+    ```java
+    public void method() {
+        // 非关键代码
+    
+        synchronized (this) {
+            // 只锁关键部分
+        }
+    
+        // 非关键代码
+    }
+    ```
+
+  - ⚠️ 4. 死锁问题
+
+    ```java
+    Object lock1 = new Object();
+    Object lock2 = new Object();
+    
+    Thread t1 = new Thread(() -> {
+        synchronized (lock1) {
+            synchronized (lock2) {}
+        }
+    });
+    
+    Thread t2 = new Thread(() -> {
+        synchronized (lock2) {
+            synchronized (lock1) {}
+        }
+    });
+    ```
+
+    👉 可能：
+
+    - T1 等 lock2
+    - T2 等 lock1
+    - → **死锁**
+
+    ✔ 解决：
+
+    - 固定加锁顺序
+
+      ```java
+      Object lock1 = new Object();
+      Object lock2 = new Object();
+      
+      Thread t1 = new Thread(() -> {
+          synchronized (lock1) {
+              synchronized (lock2) {}
+          }
+      });
+      
+      Thread t2 = new Thread(() -> {
+          synchronized (lock1) {
+              synchronized (lock2) {}
+          }
+      });
+      ```
+
+  - ⚠️ 5. public 对象作为锁（危险）
+
+    ```java
+    public Object lock = new Object();
+    ```
+
+    👉 问题：
+
+    - 外部代码可以拿到 lock 并加锁 → 影响你
+
+    ✔ 正确：
+
+    ```java
+    private final Object lock = new Object();
+    ```
+
+  - ⚠️ 6. 在集合或缓存对象上加锁
+
+    ```java
+    synchronized (list) {
+    ```
+
+    👉 风险：
+
+    - list 可能被替换
+    - 或被其他地方共享.
+
+  **开发建议**
+
+  ### ✔ 优先级建议
+
+  1. **优先用局部锁对象（最安全）**
+  2. 避免直接锁 `this`
+  3. 避免锁 `Class`
+  4. 不用 String / 包装类
+
+  ------
+
+  ### ✔ 替代方案
+
+  在复杂场景建议用：
+
+  - `ReentrantLock`（更灵活）
+  - `ReadWriteLock`
+  - `StampedLock`
+
+## 3、构造方法可以用 synchronized 修饰么？
+
+构造方法不能使用 synchronized 关键字修饰。不过，可以在构造方法内部使用 synchronized 代码块。
+
+另外，构造方法本身是线程安全的，但如果在构造方法中涉及到共享资源的操作，就需要采取适当的同步措施来保证整个构造过程的线程安全。
+
+> ## 一、为什么构造方法不能加
+>
+> ```java
+> public class Demo {
+> 
+>     // ❌ 编译错误
+>     public synchronized Demo() {
+> 
+>     }
+> }
+> ```
+>
+> 👉 原因：
+>
+> - 构造方法创建对象时，还**没有“现成的对象锁”**
+> - JVM 不允许在构造方法上直接加 `synchronized`
+>
+> ## 二、✔ 在构造方法中使用 synchronized（正确示例）
+>
+> ### 场景：多个线程创建对象，同时修改共享资源
+>
+> ```java
+> public class Counter {
+> 
+>     private static int count = 0;
+> 
+>     public Counter() {
+>         synchronized (Counter.class) {
+>             count++;
+>             System.out.println(Thread.currentThread().getName() + " -> count=" + count);
+>         }
+>     }
+> 
+>     public static void main(String[] args) {
+>         for (int i = 0; i < 10; i++) {
+>             new Thread(Counter::new).start();
+>         }
+>     }
+> }
+> ```
+>
+> 👉 说明：
+>
+> - `count` 是共享资源
+> - 用 `Counter.class` 锁 → 保证线程安全
+>
+> ## 三、❌ 不加锁导致线程不安全
+>
+> ```java
+> public class Counter {
+> 
+>     private static int count = 0;
+> 
+>     public Counter() {
+>         count++; // ❌ 非线程安全
+>     }
+> 
+>     public static void main(String[] args) throws Exception {
+>         Thread[] threads = new Thread[1000];
+> 
+>         for (int i = 0; i < 1000; i++) {
+>             threads[i] = new Thread(Counter::new);
+>             threads[i].start();
+>         }
+> 
+>         for (Thread t : threads) {
+>             t.join();
+>         }
+> 
+>         System.out.println("最终 count=" + count);
+>     }
+> }
+> ```
+>
+> 👉 结果：
+>
+> - count 很可能 < 1000（出现竞态）
+>
+> ## 四、🚨 重点：构造方法“看似安全”但实际不安全（对象逃逸）
+>
+> ### ❌ 错误示例：this 在构造过程中被发布
+>
+> ```java
+> public class EscapeDemo {
+> 
+>     private int value;
+> 
+>     public EscapeDemo() {
+>         new Thread(() -> {
+>             System.out.println("value = " + value);
+>         }).start();
+> 
+>         value = 42;
+>     }
+> 
+>     public static void main(String[] args) {
+>         new EscapeDemo();
+>     }
+> }
+> ```
+>
+> 👉 可能输出：
+>
+> ```
+> value = 0   // ❗ 未初始化完成就被访问
+> ```
+>
+> 👉 原因：
+>
+> - 线程启动时，构造还没执行完
+> - `this` 已经“逃逸”出去
+>
+> ## 五、✔ 正确做法：避免 this 逃逸
+>
+> ```java
+> public class SafeDemo {
+> 
+>     private int value;
+> 
+>     public SafeDemo() {
+>         value = 42;
+>     }
+> 
+>     public void start() {
+>         new Thread(() -> {
+>             System.out.println("value = " + value);
+>         }).start();
+>     }
+> 
+>     public static void main(String[] args) {
+>         SafeDemo demo = new SafeDemo();
+>         demo.start();
+>     }
+> }
+> ```
+>
+> 👉 关键：
+>
+> - 构造函数只做初始化
+> - 不启动线程、不发布 this
+>
+> ## 六、✔ 使用 synchronized 保护构造中的共享资源
+>
+> ```java
+> public class ResourceHolder {
+> 
+>     private static final Object lock = new Object();
+>     private static int shared = 0;
+> 
+>     public ResourceHolder() {
+>         synchronized (lock) {
+>             shared++;
+>             System.out.println(Thread.currentThread().getName() + " -> shared=" + shared);
+>         }
+>     }
+> }
+> ```
+>
+> ## 七、⚠️ 进阶问题：构造函数 + final 字段的可见性
+>
+> ```java
+> public class FinalDemo {
+> 
+>     private final int x;
+> 
+>     public FinalDemo() {
+>         x = 10;
+>     }
+> 
+>     public int getX() {
+>         return x;
+>     }
+> }
+> ```
+>
+> 👉 JVM 保证：
+>
+> - `final` 字段在构造完成后对其他线程**可见**
+>
+> 👉 前提：
+>
+> - **没有 this 逃逸**
+
+## 4、⭐️synchronized 底层原理了解吗？
+
+synchronized 关键字底层原理属于 JVM 层面的东西。
+
+### 4.1、synchronized 同步语句块的情况
+
+```java
+public class SynchronizedDemo {
+    public void method() {
+        synchronized (this) {
+            System.out.println("synchronized 代码块");
+        }
+    }
+}
+```
+
+通过 JDK 自带的 `javap` 命令查看 `SynchronizedDemo` 类的相关字节码信息：首先切换到类的对应目录执行 `javac SynchronizedDemo.java` 命令生成编译后的 .class 文件，然后执行`javap -c -s -v -l SynchronizedDemo.class`。
+
+![](./assets/synchronized-principle.png)
+
+从上面我们可以看出：**`synchronized` 同步语句块的实现使用的是 `monitorenter` 和 `monitorexit` 指令，其中 `monitorenter` 指令指向同步代码块的开始位置，`monitorexit` 指令则指明同步代码块的结束位置。**
+
+上面的字节码中包含一个 `monitorenter` 指令以及两个 `monitorexit` 指令，这是为了保证锁在同步代码块代码正常执行以及出现异常的这两种情况下都能被正确释放。
+
+当执行 `monitorenter` 指令时，线程试图获取锁也就是获取 **对象监视器 `monitor`** 的持有权。
+
+> 在 Java 虚拟机(HotSpot)中，Monitor 是基于 C++实现的，由[ObjectMonitor](https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/runtime/objectMonitor.cpp)实现的。每个对象中都内置了一个 `ObjectMonitor`对象。
+>
+> 另外，`wait/notify`等方法也依赖于`monitor`对象，这就是为什么只有在同步的块或者方法中才能调用`wait/notify`等方法，否则会抛出`java.lang.IllegalMonitorStateException`的异常的原因。
+
+在执行`monitorenter`时，会尝试获取对象的锁，如果锁的计数器为 0 则表示锁可以被获取，获取后将锁计数器设为 1 也就是加 1。
+
+![](./assets/synchronized-get-lock-code-block.png)
+
+对象锁的拥有者线程才可以执行 `monitorexit` 指令来释放锁。在执行 `monitorexit` 指令后，将锁计数器设为 0，表明锁被释放，其他线程可以尝试获取锁。
+
+![](./assets/synchronized-release-lock-block.png)
+
+如果获取对象锁失败，那当前线程就要阻塞等待，直到锁被另外一个线程释放为止。
