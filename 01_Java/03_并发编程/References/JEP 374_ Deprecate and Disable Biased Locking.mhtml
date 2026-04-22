@@ -1,0 +1,686 @@
+From: <Saved by Blink>
+Snapshot-Content-Location: https://openjdk.org/jeps/374
+Subject: JEP 374: Deprecate and Disable Biased Locking
+Date: Wed, 22 Apr 2026 15:46:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="----MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----"
+
+
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----
+Content-Type: text/html
+Content-ID: <frame-04CDF04FD1D0DC9DB7D5B18482889BFF@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+Content-Location: https://openjdk.org/jeps/374
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org=
+/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns=3D"http://www.w3.org/1999/xht=
+ml"><head><meta http-equiv=3D"Content-Type" content=3D"text/html; charset=
+=3Dwindows-1252"><link rel=3D"stylesheet" type=3D"text/css" href=3D"cid:css=
+-645d1b23-d091-4abf-89fb-aa6f8a22982f@mhtml.blink" /><title>JEP 374: Deprec=
+ate and Disable Biased Locking</title><link rel=3D"shortcut icon" href=3D"h=
+ttps://openjdk.org/images/nanoduke.ico"><link rel=3D"stylesheet" type=3D"te=
+xt/css" href=3D"https://openjdk.org/page.css"></head><body><div id=3D"main"=
+><h1>JEP 374: Deprecate and Disable Biased Locking</h1><table class=3D"head=
+"><tbody><tr><td>Owner</td><td>Patricio Chilano Mateo</td></tr><tr><td>Type=
+</td><td>Feature</td></tr><tr><td>Scope</td><td>JDK</td></tr><tr><td>Status=
+</td><td>Closed&#8201;/&#8201;Delivered</td></tr><tr><td>Release</td><td>15=
+</td></tr><tr><td>Component</td><td>hotspot&#8201;/&#8201;runtime</td></tr>=
+<tr><td>Discussion</td><td>hotspot dash runtime dash dev at openjdk dot jav=
+a dot net</td></tr><tr><td>Effort</td><td>XS</td></tr><tr><td>Duration</td>=
+<td>XS</td></tr><tr><td>Reviewed by</td><td>Coleen Phillimore, David Holmes=
+, Mikael Vidstedt</td></tr><tr><td>Endorsed by</td><td>Mikael Vidstedt</td>=
+</tr><tr><td>Created</td><td>2019/12/03 14:24</td></tr><tr><td>Updated</td>=
+<td>2021/08/28 00:39</td></tr><tr><td>Issue</td><td><a href=3D"https://bugs=
+.openjdk.org/browse/JDK-8235256">8235256</a></td></tr></tbody></table><div =
+class=3D"markdown"><h2 id=3D"Summary">Summary</h2>
+<p>Disable biased locking by default, and deprecate all related command-lin=
+e options.</p>
+<h2 id=3D"Goals">Goals</h2>
+<p>Determine the need for continued support of the legacy synchronization o=
+ptimization of biased locking, which is costly
+to maintain.</p>
+<h2 id=3D"Motivation">Motivation</h2>
+<p>Biased locking is an optimization technique used in the HotSpot Virtual =
+Machine to reduce the overhead of uncontended locking. It aims to avoid exe=
+cuting a compare-and-swap atomic operation when acquiring a monitor by assu=
+ming that a monitor remains owned by a given thread until a different threa=
+d tries to acquire it. The initial lock of the monitor <em>biases</em> the =
+monitor towards that thread, avoiding the need for atomic instructions in s=
+ubsequent synchronized operations on the same object. When many threads per=
+form many synchronized operations on objects used in a single-threaded fash=
+ion, biasing the locks has historically led to significant performance impr=
+ovements over regular locking techniques.</p>
+<p>The performance gains seen in the past are far less evident today. Many =
+applications that benefited from biased locking are older, legacy applicati=
+ons that use the early Java collection APIs, which synchronize on every acc=
+ess (e.g., <code>Hashtable</code> and <code>Vector</code>). Newer applicati=
+ons generally use the non-synchronized collections (e.g., <code>HashMap</co=
+de> and <code>ArrayList</code>), introduced in Java 1.2 for single-threaded=
+ scenarios, or the even more-performant concurrent data structures, introdu=
+ced in Java 5, for multi-threaded scenarios. This means that applications t=
+hat benefit from biased locking due to unnecessary synchronization will lik=
+ely see a performance improvement if the code is updated to use these newer=
+ classes. Furthermore, applications built around a thread-pool queue and wo=
+rker threads generally perform better with biased locking disabled. (SPECjb=
+b2015 was designed that way, e.g., while SPECjvm98 and SPECjbb2005 were not=
+). Biased locking comes with the cost of requiring an expensive revocation =
+operation in case of contention. Applications that benefit from it are ther=
+efore only those that exhibit significant amounts of uncontended synchroniz=
+ed operations, like those mentioned above, so that the cost of executing ch=
+eap lock owner checks plus an occasional expensive revocation is still lowe=
+r than the cost of executing the eluded compare-and-swap atomic instruction=
+s. Changes in the cost of atomic instructions since the introduction of bia=
+sed locking into HotSpot also change the amount of uncontended operations n=
+eeded for that relation to remain true. Another aspect worth noting is that=
+ applications won't have noticeable performance improvements from biased lo=
+cking even when the previous cost relation is true when the time spend on s=
+ynchronized operations is still only a small fraction of the total applicat=
+ion workload.</p>
+<p>Biased locking introduced a lot of complex code into the synchronization=
+ subsystem and is invasive to other HotSpot components as well. This comple=
+xity is a barrier to understanding various parts of the code and an impedim=
+ent to making significant design changes within the synchronization subsyst=
+em. To that end we would like to disable, deprecate, and eventually remove =
+support for biased locking.</p>
+<h2 id=3D"Description">Description</h2>
+<p>Prior to JDK 15, biased locking is always enabled and available. With th=
+is JEP, biased locking will no longer be enabled when HotSpot is started un=
+less <code>-XX:+UseBiasedLocking</code> is set on the command line.</p>
+<p>We will deprecate the <code>UseBiasedLocking</code> option and all optio=
+ns related to the configuration and use of biased locking.</p>
+<ul>
+<li>Product options: <code>BiasedLockingStartupDelay</code>, <code>BiasedLo=
+ckingBulkRebiasThreshold</code>, <code>BiasedLockingBulkRevokeThreshold</co=
+de>, <code>BiasedLockingDecayTime</code> and <code>UseOptoBiasInlining</cod=
+e></li>
+<li>Diagnostic options: <code>PrintBiasedLockingStatistics</code> and <code=
+>PrintPreciseBiasedLockingStatistics</code></li>
+</ul>
+<p>The options will still be accepted and acted upon, but a deprecation war=
+ning will be issued.</p>
+<h2 id=3D"Risk-and-Assumptions">Risk and Assumptions</h2>
+<p>Some Java applications may see a performance regression with biased lock=
+ing disabled. Allowing biased locking to be re-enabled on the command line =
+helps to mitigate this and provides possible insight into which situations =
+may still benefit from its usage.</p>
+</div></div><div id=3D"sidebar"><div id=3D"openjdk-sidebar-logo"><a href=3D=
+"https://openjdk.org/"><img alt=3D"OpenJDK logo" width=3D"91" height=3D"25"=
+ src=3D"https://openjdk.org/images/openjdk2.svg"></a></div><div class=3D"li=
+nks"><div class=3D"link"><a href=3D"https://openjdk.org/install/">Installin=
+g</a></div><div class=3D"link"><a href=3D"https://openjdk.org/guide/#contri=
+buting-to-an-openjdk-project">Contributing</a></div><div class=3D"link"><a =
+href=3D"https://openjdk.org/guide/#reviewing-and-sponsoring-a-change">Spons=
+oring</a></div><div class=3D"link"><a href=3D"https://openjdk.org/guide/">D=
+evelopers' Guide</a></div><div class=3D"link"><a href=3D"https://openjdk.or=
+g/groups/vulnerability/report">Vulnerabilities</a></div><div class=3D"link"=
+><a href=3D"https://jdk.java.net/">JDK GA/EA Builds</a></div></div><div cla=
+ss=3D"links"><div class=3D"links"><a href=3D"https://mail.openjdk.org/">Mai=
+ling lists</a></div><div class=3D"link"><a href=3D"https://wiki.openjdk.org=
+/">Wiki</a>
+                      =B7 <a href=3D"https://openjdk.org/irc">IRC</a></div>=
+<div class=3D"link"><a href=3D"https://mastodon.social/@openjdk" rel=3D"me"=
+>Mastodon</a></div><div class=3D"link"><a href=3D"https://bsky.app/profile/=
+openjdk.org">Bluesky</a></div></div><div class=3D"links"><div class=3D"link=
+s"><a href=3D"https://openjdk.org/bylaws">Bylaws</a> =B7 <a href=3D"https:/=
+/openjdk.org/census">Census</a></div><div class=3D"link"><a href=3D"https:/=
+/openjdk.org/legal/">Legal</a> =B7 <a href=3D"https://openjdk.org/legal/ai"=
+>AI</a></div></div><div class=3D"links"><div class=3D"links"><a href=3D"htt=
+ps://openjdk.org/workshop"><b>Workshop</b></a></div></div><div class=3D"lin=
+ks"><div class=3D"links"><a href=3D"https://openjdk.org/jeps/0"><b>JEP Proc=
+ess</b></a></div></div><div class=3D"links"><div class=3D"about">Source cod=
+e</div><div class=3D"link"><a href=3D"https://github.com/openjdk/">GitHub</=
+a></div><div class=3D"link"><a href=3D"https://hg.openjdk.org/">Mercurial</=
+a></div></div><div class=3D"links"><div class=3D"about">Tools</div><div cla=
+ss=3D"link"><a href=3D"http://git-scm.org/">Git</a></div><div class=3D"link=
+"><a href=3D"https://openjdk.org/jtreg/">jtreg harness</a></div></div><div =
+class=3D"links"><div class=3D"about">Groups</div><div class=3D"link"><a hre=
+f=3D"https://openjdk.org/groups/">(overview</a>,
+      <a href=3D"https://openjdk.org/groups/archive">archive</a>)</div><div=
+ class=3D"link"><a href=3D"https://openjdk.org/groups/adoption">Adoption</a=
+></div><div class=3D"link"><a href=3D"https://openjdk.org/groups/build">Bui=
+ld</a></div><div class=3D"link"><a href=3D"https://openjdk.org/groups/clien=
+t-libs">Client Libraries</a></div><div class=3D"link"><a href=3D"https://op=
+enjdk.org/groups/csr">Compatibility &amp; Specification Review</a></div><di=
+v class=3D"link"><a href=3D"https://openjdk.org/groups/compiler">Compiler</=
+a></div><div class=3D"link"><a href=3D"https://openjdk.org/groups/conforman=
+ce">Conformance</a></div><div class=3D"link"><a href=3D"https://openjdk.org=
+/groups/core-libs">Core Libraries</a></div><div class=3D"link"><a href=3D"h=
+ttps://openjdk.org/groups/gb">Governing Board</a></div><div class=3D"link">=
+<a href=3D"https://openjdk.org/groups/hotspot">HotSpot</a></div><div class=
+=3D"link"><a href=3D"https://openjdk.org/groups/ide-support">IDE Tooling &a=
+mp; Support</a></div><div class=3D"link"><a href=3D"https://openjdk.org/gro=
+ups/i18n">Internationalization</a></div><div class=3D"link"><a href=3D"http=
+s://openjdk.org/groups/members">Members</a></div><div class=3D"link"><a hre=
+f=3D"https://openjdk.org/groups/net">Networking</a></div><div class=3D"link=
+"><a href=3D"https://openjdk.org/groups/porters">Porters</a></div><div clas=
+s=3D"link"><a href=3D"https://openjdk.org/groups/quality">Quality</a></div>=
+<div class=3D"link"><a href=3D"https://openjdk.org/groups/security">Securit=
+y</a></div><div class=3D"link"><a href=3D"https://openjdk.org/groups/servic=
+eability">Serviceability</a></div><div class=3D"link"><a href=3D"https://op=
+enjdk.org/groups/vulnerability">Vulnerability</a></div><div class=3D"link">=
+<a href=3D"https://openjdk.org/groups/web">Web</a></div></div><div class=3D=
+"links"><div class=3D"about">Projects</div><div class=3D"link">(<a href=3D"=
+https://openjdk.org/projects/">overview</a>,
+      <a href=3D"https://openjdk.org/projects/archive">archive</a>)</div><d=
+iv class=3D"link"><a href=3D"https://openjdk.org/projects/amber">Amber</a><=
+/div><div class=3D"link"><a href=3D"https://openjdk.org/projects/babylon">B=
+abylon</a></div><div class=3D"link"><a href=3D"https://openjdk.org/projects=
+/brisbane">Brisbane</a></div><div class=3D"link"><a href=3D"https://openjdk=
+.org/projects/crac">CRaC</a></div><div class=3D"link"><a href=3D"https://op=
+enjdk.org/projects/code-tools">Code Tools</a></div><div class=3D"link"><a h=
+ref=3D"https://openjdk.org/projects/coin">Coin</a></div><div class=3D"link"=
+><a href=3D"https://openjdk.org/projects/cvmi">Common VM Interface</a></div=
+><div class=3D"link"><a href=3D"https://openjdk.org/projects/detroit">Detro=
+it</a></div><div class=3D"link"><a href=3D"https://openjdk.org/projects/gui=
+de">Developers' Guide</a></div><div class=3D"link"><a href=3D"https://openj=
+dk.org/projects/duke">Duke</a></div><div class=3D"link"><a href=3D"https://=
+openjdk.org/projects/graal">Graal</a></div><div class=3D"link"><a href=3D"h=
+ttps://openjdk.org/projects/icedtea">IcedTea</a></div><div class=3D"link"><=
+a href=3D"https://openjdk.org/projects/jdk8u">JDK 8 Updates</a></div><div c=
+lass=3D"link"><a href=3D"https://openjdk.org/projects/jdk9">JDK 9</a></div>=
+<div class=3D"link"><a href=3D"https://openjdk.org/projects/jdk">JDK</a>
+      (=85,
+       <a href=3D"https://openjdk.org/projects/jdk/25">25</a>,
+       <a href=3D"https://openjdk.org/projects/jdk/26">26</a>,
+       <a href=3D"https://openjdk.org/projects/jdk/27">27</a>)</div><div cl=
+ass=3D"link"><a href=3D"https://openjdk.org/projects/jdk-updates">JDK Updat=
+es</a></div><div class=3D"link"><a href=3D"https://openjdk.org/projects/jmc=
+">JMC</a></div><div class=3D"link"><a href=3D"https://openjdk.org/projects/=
+jigsaw">Jigsaw</a></div><div class=3D"link"><a href=3D"https://openjdk.org/=
+projects/lanai">Lanai</a></div><div class=3D"link"><a href=3D"https://openj=
+dk.org/projects/leyden">Leyden</a></div><div class=3D"link"><a href=3D"http=
+s://openjdk.org/projects/lilliput">Lilliput</a></div><div class=3D"link"><a=
+ href=3D"https://openjdk.org/projects/loom">Loom</a></div><div class=3D"lin=
+k"><a href=3D"https://openjdk.org/projects/jmm">Memory Model Update</a></di=
+v><div class=3D"link"><a href=3D"https://openjdk.org/projects/metropolis">M=
+etropolis</a></div><div class=3D"link"><a href=3D"https://openjdk.org/proje=
+cts/mlvm">Multi-Language VM</a></div><div class=3D"link"><a href=3D"https:/=
+/openjdk.org/projects/nashorn">Nashorn</a></div><div class=3D"link"><a href=
+=3D"https://openjdk.org/projects/nio">New I/O</a></div><div class=3D"link">=
+<a href=3D"https://openjdk.org/projects/openjfx">OpenJFX</a></div><div clas=
+s=3D"link"><a href=3D"https://openjdk.org/projects/panama">Panama</a></div>=
+<div class=3D"link"><a href=3D"https://openjdk.org/projects/aarch32-port">P=
+ort: AArch32</a></div><div class=3D"link"><a href=3D"https://openjdk.org/pr=
+ojects/aarch64-port">Port: AArch64</a></div><div class=3D"link"><a href=3D"=
+https://openjdk.org/projects/bsd-port">Port: BSD</a></div><div class=3D"lin=
+k"><a href=3D"https://openjdk.org/projects/haiku-port">Port: Haiku</a></div=
+><div class=3D"link"><a href=3D"https://openjdk.org/projects/mips-port">Por=
+t: MIPS</a></div><div class=3D"link"><a href=3D"https://openjdk.org/project=
+s/mobile">Port: Mobile</a></div><div class=3D"link"><a href=3D"https://open=
+jdk.org/projects/ppc-aix-port">Port: PowerPC/AIX</a></div><div class=3D"lin=
+k"><a href=3D"https://openjdk.org/projects/riscv-port">Port: RISC-V</a></di=
+v><div class=3D"link"><a href=3D"https://openjdk.org/projects/s390x-port">P=
+ort: s390x</a></div><div class=3D"link"><a href=3D"https://openjdk.org/proj=
+ects/sctp">SCTP</a></div><div class=3D"link"><a href=3D"https://openjdk.org=
+/projects/shenandoah">Shenandoah</a></div><div class=3D"link"><a href=3D"ht=
+tps://openjdk.org/projects/skara">Skara</a></div><div class=3D"link"><a hre=
+f=3D"https://openjdk.org/projects/sumatra">Sumatra</a></div><div class=3D"l=
+ink"><a href=3D"https://openjdk.org/projects/tsan">Tsan</a></div><div class=
+=3D"link"><a href=3D"https://openjdk.org/projects/valhalla">Valhalla</a></d=
+iv><div class=3D"link"><a href=3D"https://openjdk.org/projects/wakefield">W=
+akefield</a></div><div class=3D"link"><a href=3D"https://openjdk.org/projec=
+ts/zero">Zero</a></div><div class=3D"link"><a href=3D"https://openjdk.org/p=
+rojects/zgc">ZGC</a></div></div><div class=3D"buttons"><a href=3D"https://o=
+racle.com/"><img alt=3D"Oracle logo" width=3D"100" height=3D"13" src=3D"htt=
+ps://openjdk.org/images/oracle.svg"></a></div></div><div id=3D"footer">
+
+        =A9 2026 Oracle Corporation and/or its affiliates
+        <br><a href=3D"https://openjdk.org/legal/tou/">Terms of Use</a>
+        =B7
+       =20
+            License: <a href=3D"https://openjdk.org/legal/gplv2+ce.html">GP=
+Lv2</a>
+        =B7 <a href=3D"https://www.oracle.com/us/legal/privacy/">Privacy</a=
+>
+        =B7 <a href=3D"https://openjdk.org/legal/openjdk-trademark-notice.h=
+tml">Trademarks</a></div>
+</body></html>
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----
+Content-Type: image/svg+xml
+Content-Transfer-Encoding: quoted-printable
+Content-Location: https://openjdk.org/images/oracle.svg
+
+<?xml version=3D"1.0" encoding=3D"UTF-8" standalone=3D"no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   version=3D"1.1"
+   id=3D"svg2"
+   width=3D"132.13519"
+   height=3D"17.182266"
+   viewBox=3D"0 0 132.13519 17.182266"
+   sodipodi:docname=3D"oracle.svg"
+   inkscape:version=3D"1.2.2 (b0a8486541, 2022-12-01)"
+   xmlns:inkscape=3D"http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi=3D"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns=3D"http://www.w3.org/2000/svg"
+   xmlns:svg=3D"http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id=3D"namedview7"
+     pagecolor=3D"#ffffff"
+     bordercolor=3D"#000000"
+     borderopacity=3D"0.25"
+     inkscape:showpageshadow=3D"2"
+     inkscape:pageopacity=3D"0.0"
+     inkscape:pagecheckerboard=3D"0"
+     inkscape:deskcolor=3D"#d1d1d1"
+     showgrid=3D"false"
+     inkscape:zoom=3D"7.906864"
+     inkscape:cx=3D"65.386226"
+     inkscape:cy=3D"8.7898312"
+     inkscape:window-width=3D"3836"
+     inkscape:window-height=3D"2134"
+     inkscape:window-x=3D"0"
+     inkscape:window-y=3D"22"
+     inkscape:window-maximized=3D"1"
+     inkscape:current-layer=3D"svg2" />
+  <defs
+     id=3D"defs6" />
+  <g
+     id=3D"g8"
+     transform=3D"matrix(1.3333333,0,0,-1.3333333,-17.0208,34.205732)">
+    <g
+       id=3D"g10"
+       transform=3D"scale(0.1)">
+      <path
+         d=3D"m 1030.17,150.137 c -18.91,0 -34.842,12.695 -39.764,30.058 h =
+104.884 l 14.45,22.5 H 990.406 c 4.903,17.403 20.854,30.059 39.764,30.059 h=
+ 72.01 l 14.4,22.559 h -88.05 c -35.214,0 -63.788,-28.575 -63.788,-63.868 0=
+,-35.254 28.574,-63.769 63.788,-63.769 h 75.74 l 14.4,22.461 h -88.5 M 730.=
+035,127.676 h 75.742 l 14.336,22.461 h -88.398 c -22.91,0 -41.367,18.535 -4=
+1.367,41.308 0,22.871 18.457,41.309 41.367,41.309 h 71.953 l 14.512,22.559 =
+h -88.145 c -35.273,0 -63.926,-28.575 -63.926,-63.868 0,-35.254 28.653,-63.=
+769 63.926,-63.769 m -466.043,22.461 h -70.855 c -22.805,0 -41.282,18.535 -=
+41.282,41.308 0,22.871 18.477,41.309 41.282,41.309 h 70.855 c 22.883,0 41.3=
+4,-18.438 41.34,-41.309 0,-22.773 -18.457,-41.308 -41.34,-41.308 m -72.488,=
+-22.461 h 74.187 c 35.293,0 63.711,28.515 63.711,63.769 0,35.293 -28.418,63=
+.868 -63.711,63.868 h -74.187 c -35.254,0 -63.848,-28.575 -63.848,-63.868 0=
+,-35.254 28.594,-63.769 63.848,-63.769 m 258.367,41.328 c 23.899,0 43.113,1=
+9.336 43.113,43.164 0,23.828 -19.214,43.145 -43.113,43.145 H 342.488 V 127.=
+676 h 24.543 v 105.078 h 81.211 c 11.399,0 20.637,-9.199 20.637,-20.586 0,-=
+11.367 -9.238,-20.723 -20.637,-20.723 l -69.211,0.059 73.305,-63.828 h 35.6=
+09 l -49.234,41.328 h 11.16 m 406.004,-18.789 v 105.098 h -24.59 v -115.43 =
+c 0,-3.145 1.328,-6.231 3.633,-8.457 2.344,-2.422 5.566,-3.75 8.945,-3.75 H=
+ 955.68 l 14.57,22.539 H 855.875 m -300.391,22.461 h 65.469 l -34.59,55.82 =
+-63.496,-100.82 h -29.004 l 77.305,120.996 c 3.301,4.902 8.965,7.871 15.156=
+,7.871 6.055,0 11.621,-2.871 14.922,-7.656 l 77.539,-121.211 h -28.926 l -1=
+3.632,22.539 h -66.289 l -14.454,22.461"
+         style=3D"fill:#c9352f;fill-opacity:1;fill-rule:nonzero;stroke:none=
+"
+         id=3D"path12" />
+    </g>
+  </g>
+</svg>=0A
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----
+Content-Type: image/svg+xml
+Content-Transfer-Encoding: quoted-printable
+Content-Location: https://openjdk.org/images/openjdk2.svg
+
+<?xml version=3D"1.0" encoding=3D"UTF-8" standalone=3D"no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   version=3D"1.1"
+   id=3D"svg2"
+   width=3D"2525.4692"
+   height=3D"685.29999"
+   viewBox=3D"0 0 2525.4692 685.29999"
+   sodipodi:docname=3D"openjdk.svg"
+   inkscape:version=3D"1.2.2 (b0a8486541, 2022-12-01)"
+   xmlns:inkscape=3D"http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi=3D"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns=3D"http://www.w3.org/2000/svg"
+   xmlns:svg=3D"http://www.w3.org/2000/svg">
+  <defs
+     id=3D"defs6" />
+  <sodipodi:namedview
+     id=3D"namedview4"
+     pagecolor=3D"#ffffff"
+     bordercolor=3D"#000000"
+     borderopacity=3D"0.25"
+     inkscape:showpageshadow=3D"2"
+     inkscape:pageopacity=3D"0.0"
+     inkscape:pagecheckerboard=3D"0"
+     inkscape:deskcolor=3D"#d1d1d1"
+     showgrid=3D"false"
+     inkscape:zoom=3D"0.97210017"
+     inkscape:cx=3D"1488.0154"
+     inkscape:cy=3D"545.72565"
+     inkscape:window-width=3D"3836"
+     inkscape:window-height=3D"2134"
+     inkscape:window-x=3D"0"
+     inkscape:window-y=3D"22"
+     inkscape:window-maximized=3D"1"
+     inkscape:current-layer=3D"g8" />
+  <g
+     inkscape:groupmode=3D"layer"
+     inkscape:label=3D"Image"
+     id=3D"g8"
+     transform=3D"translate(402.68879,141.91898)">
+    <g
+       aria-label=3D"Open"
+       id=3D"text170"
+       style=3D"font-size:800px;font-family:SunSansCondensed-Regular;-inksc=
+ape-font-specification:'SunSansCondensed-Regular, Normal';letter-spacing:-6=
+.45px;fill:#e76f00">
+      <path
+         d=3D"m -39.488782,123.68102 q 0,156 -54.4,222.4 -53.599998,66.4 -1=
+31.199998,66.4 -83.2,0 -130.4,-65.6 -47.2,-66.4 -47.2,-208 0,-137.6000019 5=
+1.2,-208.800002 52,-71.999998 134.4,-71.999998 81.6,0 129.599998,66.399998 =
+48,66.4000001 48,199.200002 z m -295.199998,0 q 0,117.6 30.4,176 30.4,57.6 =
+85.6,57.6 51.2,0 80.8,-54.4 30.4,-55.2 30.4,-164 0,-110.400002 -32,-168.000=
+002 -31.2,-58.4 -86.4,-58.4 -47.2,0 -78.4,55.2 -30.4,55.2 -30.4,156.000002 =
+z"
+         style=3D"font-weight:100;-inkscape-font-specification:'SunSansCond=
+ensed-Regular Thin'"
+         id=3D"path173" />
+      <path
+         style=3D"font-weight:100;-inkscape-font-specification:'SunSansCond=
+ensed-Regular Thin'"
+         d=3D"M 41.261523,542.88102 V 7.6810181 h 49.6 l 5.6,42.3999999 q 2=
+5.599997,-20.8 51.199997,-34.4 26.4,-13.5999999 48.8,-13.5999999 49.6,0 80.=
+8,50.3999999 32,49.600002 32,131.200002 0,102.4 -44,164.8 -43.2,62.4 -124,6=
+2.4 -8.8,0 -17.6,0 -15.2,-2.4 -22.4,-3.2 v 135.2 z m 108.799997,-177.6 q 46=
+.4,0 71.2,-44 25.6,-44 25.6,-116.8 0,-68.8 -20,-110.400002 -20,-42.4 -52.8,=
+-42.4 -15.2,0 -34.4,12.8 -19.2,12.8 -38.4,32 V 354.08102 q 12,5.6 24,8.8 12=
+.8,2.4 24.8,2.4 z"
+         id=3D"path175" />
+      <path
+         d=3D"m 430.01171,214.08102 v 11.2 q 0,68 24,101.6 24,32.8 65.6,32.=
+8 26.4,0 51.2,-5.6 24.8,-6.4 47.2,-16 l 11.2,36 q -30.4,17.6 -62.4,27.2 -31=
+.2,9.6 -64,9.6 -67.2,0 -101.6,-46.4 -34.4,-47.2 -34.4,-147.2 0,-104 36,-159=
+.200002 36,-55.1999999 103.2,-55.1999999 64,0 93.6,48.7999999 30.4,48 30.4,=
+162.400002 z m 140.8,-61.6 q 0,-48.8 -16.8,-77.600002 -16.8,-28.8 -52,-28.8=
+ -32,0 -52,36 -20,35.200002 -20,88.800002 h 140.8 z"
+         style=3D"font-weight:100;-inkscape-font-specification:'SunSansCond=
+ensed-Regular Thin'"
+         id=3D"path177" />
+      <path
+         d=3D"m 768.36219,7.6810181 5.6,43.1999999 q 24,-20 52.8,-34.4 28.8=
+,-14.3999999 52,-14.3999999 48.8,0 74.4,39.9999999 25.6,39.2 25.6,134.40000=
+2 l -2.4,228 h -60 l 1.6,-212 q 0,-77.6 -14.4,-109.600002 -14.4,-32 -45.6,-=
+32 -18.4,0 -39.2,13.6 -20.8,13.6 -40,32 V 404.48102 h -60 V 7.6810181 Z"
+         style=3D"font-weight:100;-inkscape-font-specification:'SunSansCond=
+ensed-Regular Thin'"
+         id=3D"path179" />
+    </g>
+    <g
+       aria-label=3D"JDK"
+       id=3D"text380"
+       style=3D"font-weight:100;font-size:800px;font-family:SunSansCondense=
+d-Regular;-inkscape-font-specification:'SunSansCondensed-Regular Thin';lett=
+er-spacing:-4.99px;fill:#5382a1;stroke:#000000;stroke-opacity:0">
+      <path
+         d=3D"m 1070.6609,542.88102 -50.4,-44.8 q 25.6,-32 34.4,-72 8.8,-40=
+ 8.8,-94.4 v -467.2 h 108 v 487.2 q 0,64 -24,112 -23.2,48 -76.8,79.2 z"
+         style=3D"font-weight:normal;font-family:SunSans-Demi;-inkscape-fon=
+t-specification:'SunSans-Demi, Normal'"
+         id=3D"path286" />
+      <path
+         d=3D"m 1396.0708,407.68102 q -20.8,0 -69.6,-1.6 -48,-1.6 -51.2,-1.=
+6 v -540 l 144,-1.6 q 121.6,0 180.8,67.999998 60,68.0000001 60,186.400002 0=
+,141.6 -64.8,216 -64.8,74.4 -199.2,74.4 z m 13.6,-453.600002 h -26.4 V 314.=
+08102 l 32,1.6 q 62.4,0 95.2,-44 33.6,-44 33.6,-143.2 0,-85.600002 -31.2,-1=
+29.6000019 -31.2,-44.8000001 -103.2,-44.8000001 z"
+         style=3D"font-weight:normal;font-family:SunSans-Demi;-inkscape-fon=
+t-specification:'SunSans-Demi, Normal'"
+         id=3D"path288" />
+      <path
+         d=3D"m 1987.8803,404.48102 -139.2,-246.4 v 246.4 h -108 v -540 h 1=
+08 V 90.881018 l 140.8,-226.399998 h 123.2 l -176,240.8 185.6,299.2 z"
+         style=3D"font-weight:normal;font-family:SunSans-Demi;-inkscape-fon=
+t-specification:'SunSans-Demi, Normal'"
+         id=3D"path290" />
+    </g>
+  </g>
+</svg>=0A
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: https://openjdk.org/.fonts/dejavu.css
+
+@charset "windows-1252";
+
+@font-face { font-family: "DejaVu Sans Mono"; src: url("DejaVuSansMono-webf=
+ont.woff") format("woff"), url("DejaVuSansMono-webfont.ttf") format("truety=
+pe"); font-weight: normal; font-style: normal; }
+
+@font-face { font-family: "DejaVu Sans Mono"; src: url("DejaVuSansMono-Obli=
+que-webfont.woff") format("woff"), url("DejaVuSansMono-Oblique-webfont.ttf"=
+) format("truetype"); font-weight: normal; font-style: italic; }
+
+@font-face { font-family: "DejaVu Sans Mono"; src: url("DejaVuSansMono-Bold=
+-webfont.woff") format("woff"), url("DejaVuSansMono-Bold-webfont.ttf") form=
+at("truetype"); font-weight: bold; font-style: normal; }
+
+@font-face { font-family: "DejaVu Sans Mono"; src: url("DejaVuSansMono-Bold=
+Oblique-webfont.woff") format("woff"), url("DejaVuSansMono-BoldOblique-webf=
+ont.ttf") format("truetype"); font-weight: bold; font-style: italic; }
+
+@font-face { font-family: "DejaVu Sans"; src: url("DejaVuSans-webfont.woff"=
+) format("woff"), url("DejaVuSans-webfont.ttf") format("truetype"); font-we=
+ight: normal; font-style: normal; }
+
+@font-face { font-family: "DejaVu Sans"; src: url("DejaVuSans-Oblique-webfo=
+nt.woff") format("woff"), url("DejaVuSans-Oblique-webfont.ttf") format("tru=
+etype"); font-weight: normal; font-style: italic; }
+
+@font-face { font-family: "DejaVu Sans"; src: url("DejaVuSans-Bold-webfont.=
+woff") format("woff"), url("DejaVuSans-Bold-webfont.ttf") format("truetype"=
+); font-weight: bold; font-style: normal; }
+
+@font-face { font-family: "DejaVu Sans"; src: url("DejaVuSans-BoldOblique-w=
+ebfont.woff") format("woff"), url("DejaVuSans-BoldOblique-webfont.ttf") for=
+mat("truetype"); font-weight: bold; font-style: italic; }
+
+@font-face { font-family: "DejaVu Sans Condensed"; src: url("DejaVuSansCond=
+ensed-webfont.woff") format("woff"), url("DejaVuSansCondensed-webfont.ttf")=
+ format("truetype"); font-weight: normal; font-style: normal; }
+
+@font-face { font-family: "DejaVu Sans Condensed"; src: url("DejaVuSansCond=
+ensed-Oblique-webfont.woff") format("woff"), url("DejaVuSansCondensed-Obliq=
+ue-webfont.ttf") format("truetype"); font-weight: normal; font-style: itali=
+c; }
+
+@font-face { font-family: "DejaVu Sans Condensed"; src: url("DejaVuSansCond=
+ensed-Bold-webfont.woff") format("woff"), url("DejaVuSansCondensed-Bold-web=
+font.ttf") format("truetype"); font-weight: bold; font-style: normal; }
+
+@font-face { font-family: "DejaVu Sans Condensed"; src: url("DejaVuSansCond=
+ensed-BoldOblique-webfont.woff") format("woff"), url("DejaVuSansCondensed-B=
+oldOblique-webfont.ttf") format("truetype"); font-weight: bold; font-style:=
+ italic; }
+
+@font-face { font-family: "DejaVu Serif"; src: url("DejaVuSerif-webfont.wof=
+f") format("woff"), url("DejaVuSerif-webfont.ttf") format("truetype"); font=
+-weight: normal; font-style: normal; }
+
+@font-face { font-family: "DejaVu Serif"; src: url("DejaVuSerif-Italic-webf=
+ont.woff") format("woff"), url("DejaVuSerif-Italic-webfont.ttf") format("tr=
+uetype"); font-weight: normal; font-style: italic; }
+
+@font-face { font-family: "DejaVu Serif"; src: url("DejaVuSerif-Bold-webfon=
+t.woff") format("woff"), url("DejaVuSerif-Bold-webfont.ttf") format("truety=
+pe"); font-weight: bold; font-style: normal; }
+
+@font-face { font-family: "DejaVu Serif"; src: url("DejaVuSerif-BoldItalic-=
+webfont.woff") format("woff"), url("DejaVuSerif-BoldItalic-webfont.ttf") fo=
+rmat("truetype"); font-weight: bold; font-style: italic; }
+
+@font-face { font-family: "DejaVu Serif Condensed"; src: url("DejaVuSerifCo=
+ndensed-webfont.woff") format("woff"), url("DejaVuSerifCondensed-webfont.tt=
+f") format("truetype"); font-weight: normal; font-style: normal; }
+
+@font-face { font-family: "DejaVu Serif Condensed"; src: url("DejaVuSerifCo=
+ndensed-Italic-webfont.woff") format("woff"), url("DejaVuSerifCondensed-Ita=
+lic-webfont.ttf") format("truetype"); font-weight: normal; font-style: ital=
+ic; }
+
+@font-face { font-family: "DejaVu Serif Condensed"; src: url("DejaVuSerifCo=
+ndensed-Bold-webfont.woff") format("woff"), url("DejaVuSerifCondensed-Bold-=
+webfont.ttf") format("truetype"); font-weight: bold; font-style: normal; }
+
+@font-face { font-family: "DejaVu Serif Condensed"; src: url("DejaVuSerifCo=
+ndensed-BoldItalic-webfont.woff") format("woff"), url("DejaVuSerifCondensed=
+-BoldItalic-webfont.ttf") format("truetype"); font-weight: bold; font-style=
+: italic; }
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: https://openjdk.org/page.css
+
+@charset "windows-1252";
+
+@import url(".fonts/dejavu.css");
+
+body { margin: 2em; font-family: "DejaVu Sans", "Bitstream Vera Sans", "Lux=
+i Sans", Verdana, Arial, Helvetica; font-size: 10pt; line-height: 1.4; }
+
+pre, code, tt { font-family: "DejaVu Sans Mono", "Bitstream Vera Sans Mono"=
+, "Luxi Mono", "Courier New", monospace; }
+
+pre { font-size: smaller; }
+
+a { text-decoration: none; }
+
+a:link { color: rgb(67, 114, 145); }
+
+a:visited { color: rgb(102, 102, 102); }
+
+a[href]:hover { color: rgb(231, 111, 0); }
+
+a img { border-width: 0px; }
+
+img { background: white; }
+
+body { width: 54em; }
+
+#main { width: 42em; padding-right: 2em; }
+
+#sidebar { font-size: 7pt; width: 11em; padding-right: 2em; margin-left: 0e=
+m; }
+
+#footer { padding-top: 4em; text-align: center; font-size: 7pt; }
+
+#main { float: right; }
+
+#footer { clear: both; }
+
+div.links, div.buttons, div.about { padding-top: 0.5ex; padding-right: 0em;=
+ line-height: 1.3; }
+
+div.links div.link { margin-left: 1em; text-indent: -1em; }
+
+div.about { font-weight: bold; color: rgb(85, 85, 85); }
+
+div.buttons img { display: block; padding-top: 1.5ex; }
+
+#footer, #footer a, #footer a:link, #footer a:visited, div.links { color: r=
+gb(136, 136, 136); }
+
+p { padding: 0pt; margin: 1ex 0em; }
+
+p:first-child, pre:first-child { margin-top: 0pt; }
+
+h1 { font-size: 13pt; font-weight: bold; padding: 0pt; margin: 2ex 0.5ex 1e=
+x 0pt; }
+
+h1:first-child, h2:first-child { margin-top: 0ex; }
+
+h2 { font-size: 11pt; font-weight: bold; padding: 0pt; margin: 2ex 0pt 1ex;=
+ }
+
+h3 { font-size: 10pt; font-weight: bold; font-style: italic; padding: 0pt; =
+margin: 1ex 0pt; }
+
+h4 { font-size: 9pt; font-weight: bold; padding: 0pt; margin: 1ex 0pt; }
+
+img.openjdk-logo { padding-top: 25px; margin-top: 1em; margin-bottom: 1em; =
+}
+
+ul, ol { margin-top: 1ex; margin-bottom: 1ex; margin-right: 2em; }
+
+ul { padding-left: 2em; list-style-type: square; }
+
+ul ul { margin-top: 0ex; margin-bottom: 0ex; }
+
+li { margin-top: 0pt; margin-bottom: 0pt; }
+
+li > p:first-child { margin-top: 1ex; }
+
+ul.spread > li, ol.spread > li { margin-top: 1ex; margin-bottom: 1ex; }
+
+ul.spread > li > ul > li:first-child { margin-top: 1ex; }
+
+#openjdk-sidebar-logo { width: 91px; height: 25px; margin-bottom: 1ex; }
+
+div.orange-box { border: 2px solid rgb(231, 111, 0); margin: 2ex 1em; paddi=
+ng: 1ex 1em 0px; }
+
+input#searchBox { border: 1px solid gray; padding-left: 1px; padding-right:=
+ 1px; font-family: monospace; font-size: 7pt; }
+
+div.search { padding: 0.5ex 0ex 1ex; }
+
+blockquote { margin: 1.5ex 0em 1.5ex 2em; }
+
+div.last-update { font-size: 8pt; margin-top: 4ex; text-align: right; }
+
+table.risk-matrix { width: auto; overflow: visible; margin-left: 2em; }
+
+table.risk-matrix th, table.risk-matrix td { padding-left: 2em; }
+
+table.risk-matrix th { text-align: left; }
+
+table.risk-matrix td { text-align: center; vertical-align: baseline; }
+
+table.risk-matrix td:nth-child(1), table.risk-matrix td:nth-child(2) { text=
+-align: left; }
+
+table.risk-matrix th:first-child, table.risk-matrix td:first-child { paddin=
+g-left: 0px; }
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB----
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: cid:css-645d1b23-d091-4abf-89fb-aa6f8a22982f@mhtml.blink
+
+@charset "windows-1252";
+
+table { border-collapse: collapse; padding: 0px; margin: 1em 0px 1em 2em; }
+
+tr:first-child th, tr:first-child td { padding-top: 0px; }
+
+th, td { padding: 0.5ex 0px 0px; vertical-align: baseline; text-align: left=
+; }
+
+td + td, th + th { padding-left: 1em; }
+
+td:first-child, th:first-child, td.jep { text-align: right; }
+
+table.head td:first-child { font-style: italic; padding-left: 2em; white-sp=
+ace: nowrap; }
+
+pre { padding-left: 2em; margin: 1ex 0px; font-size: inherit; }
+
+table pre { padding-left: 0px; margin: 0px; }
+
+table.jeps td:first-child + td, table.jeps td:first-child + td + td { paddi=
+ng-left: 0.5em; }
+
+table.jeps td:first-child, table.jeps td:first-child + td, table.jeps td:fi=
+rst-child + td + td { font-size: smaller; }
+
+table.jeps td.cl { font-size: smaller; padding-right: 0px; text-align: righ=
+t; }
+
+table.jeps td.cm { font-size: smaller; padding-left: 0.1em; padding-right: =
+0.1em; }
+
+table.jeps td.cr { font-size: smaller; padding-left: 0px; }
+
+table.jeps td.z { padding-left: 0px; padding-right: 0px; }
+
+table.head td { padding-top: 0px; }
+------MultipartBoundary--tqFNtHgnvkRDi2i0qIXTAvfUcsN6Yo5B2LThP9YGYB------

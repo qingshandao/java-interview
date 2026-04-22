@@ -1839,3 +1839,142 @@ public class SynchronizedDemo2 {
 锁主要存在四种状态，依次是：无锁状态、偏向锁状态、轻量级锁状态、重量级锁状态，他们会随着竞争的激烈而逐渐升级。注意锁可以升级不可降级，这种策略是为了提高获得锁和释放锁的效率。
 
 `synchronized` 锁升级是一个比较复杂的过程，面试也很少问到，如果你想要详细了解的话，可以看看这篇文章：[浅析 synchronized 锁升级的原理与实现](./References\浅析synchronized锁升级的原理与实现 - 小新成长之路 - 博客园.mhtml)。
+
+## 6、synchronized 的偏向锁为什么被废弃了？
+
+Open JDK 官方声明：[JEP 374: Deprecate and Disable Biased Locking](./References\JEP 374_ Deprecate and Disable Biased Locking.mhtml)
+
+在 JDK15 中，偏向锁被默认关闭（仍然可以使用 `-XX:+UseBiasedLocking` 启用偏向锁），在 JDK18 中，偏向锁已经被彻底废弃（无法通过命令行打开）。
+
+在官方声明中，主要原因有两个方面：
+
+- **性能收益不明显：**
+
+偏向锁是 HotSpot 虚拟机的一项优化技术，可以提升单线程对同步代码块的访问性能。
+
+受益于偏向锁的应用程序通常使用了早期的 Java 集合 API，例如 HashTable、Vector，在这些集合类中通过 synchronized 来控制同步，这样在单线程频繁访问时，通过偏向锁会减少同步开销。
+
+随着 JDK 的发展，出现了 ConcurrentHashMap 高性能的集合类，在集合类内部进行了许多性能优化，此时偏向锁带来的性能收益就不明显了。
+
+偏向锁仅仅在 **单线程访问同步代码块（当锁不存在竞争（始终由同一线程使用））** 的场景中可以获得性能收益。
+
+如果存在多线程竞争，就需要 **撤销偏向锁** ，这个操作的性能开销是比较昂贵的。偏向锁的撤销需要等待进入到全局安全点（safe point），该状态下所有线程都是暂停的，此时去检查线程状态并进行偏向锁的撤销。
+
+- **JVM 内部代码维护成本太高：**
+
+偏向锁将许多复杂代码引入到同步子系统，并且对其他的 HotSpot 组件也具有侵入性。这种复杂性为理解代码、系统重构带来了困难，因此， OpenJDK 官方希望禁用、废弃并删除偏向锁。
+
+## 7、⭐️synchronized 和 volatile 有什么区别？
+
+`synchronized` 关键字和 `volatile` 关键字是两个互补的存在，而不是对立的存在！
+
+- `volatile` 关键字是线程同步的轻量级实现，所以 `volatile`性能肯定比`synchronized`关键字要好 。但是 `volatile` 关键字只能用于变量而 `synchronized` 关键字可以修饰方法以及代码块 。
+- `volatile` 关键字能保证数据的可见性，但不能保证数据的原子性。`synchronized` 关键字两者都能保证。
+- `volatile`关键字主要用于解决变量在多个线程之间的可见性，而 `synchronized` 关键字解决的是多个线程之间访问资源的同步性。
+
+### 7.1、volatile 与 synchronized 的性能对比
+
+上面提到 `volatile` 是线程同步的轻量级实现，性能比 `synchronized` 要好。下面从底层原理的角度分析为什么 `volatile` 性能更好，以及在什么情况下应该选择哪个。
+
+周志明在《深入理解 Java 虚拟机》中指出：
+
+> volatile 变量的读操作的性能消耗与普通变量几乎没有什么差别，但是**写操作则可能会慢**上一些，因为它需要在本地代码中插入许多内存屏障指令来保证处理器不发生乱序执行。不过即便如此，大多数场景下 volatile 的总开销仍然要比锁来得更低。
+
+二者性能差异的根本原因在于底层实现机制不同：
+
+| 对比维度         | `volatile`                                                   | `synchronized`                                               |
+| ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **实现层面**     | 通过插入内存屏障指令实现，不涉及线程阻塞和上下文切换         | 依赖操作系统的互斥锁（Mutex Lock），涉及用户态与内核态的切换 |
+| **读操作开销**   | 与普通变量几乎相同                                           | 需要获取 monitor 锁，即使无竞争也有一定开销（偏向锁/轻量级锁 CAS） |
+| **写操作开销**   | 需要插入 `StoreStore` + `StoreLoad` 内存屏障，有一定开销但不会导致线程阻塞 | 需要获取和释放 monitor 锁，有竞争时会导致线程阻塞和上下文切换 |
+| **竞争时的表现** | 不会导致线程阻塞，始终是非阻塞的                             | 线程竞争激烈时，会频繁发生阻塞和唤醒，上下文切换开销大       |
+| **功能范围**     | 只能修饰变量，只保证可见性和有序性                           | 可以修饰方法和代码块，同时保证可见性、有序性和原子性         |
+
+**选择建议：**
+
+- 如果只需要保证变量的可见性（如状态标志位、DCL 单例中的实例引用），优先使用 `volatile`，因为它的开销更小。
+- 如果需要保证复合操作的原子性（如 `i++`、先检查后执行等），则必须使用 `synchronized`、`Lock` 或原子类，`volatile` 无法胜任。
+
+# 四、ReentrantLock
+## 1、ReentrantLock 是什么？
+
+`ReentrantLock` 实现了 `Lock` 接口，是一个可重入且独占式的锁，和 `synchronized` 关键字类似。不过，`ReentrantLock` 更灵活、更强大，增加了轮询、超时、中断、公平锁和非公平锁等高级功能。
+
+```java
+public class ReentrantLock implements Lock, java.io.Serializable {}
+```
+
+`ReentrantLock` 里面有一个内部类 `Sync`，`Sync` 继承 AQS（`AbstractQueuedSynchronizer`），添加锁和释放锁的大部分操作实际上都是在 `Sync` 中实现的。`Sync` 有公平锁 `FairSync` 和非公平锁 `NonfairSync` 两个子类。
+
+![](./assets/reentrantlock-class-diagram.png)
+
+`ReentrantLock` 默认使用 **非公平锁**，也可以通过构造器来显式的指定使用公平锁。
+
+```java
+// 传入一个 boolean 值，true 时为公平锁，false 时为非公平锁
+public ReentrantLock(boolean fair) {
+    sync = fair ? new FairSync() : new NonfairSync();
+}
+```
+
+从上面的内容可以看出， `ReentrantLock` 的底层就是由 AQS 来实现的。关于 AQS 的相关内容推荐阅读 [AQS 详解](./★重要知识点\07_AQS详解.md) 这篇文章。
+
+## 2、公平锁和非公平锁有什么区别？
+
+**公平锁** : 锁被释放之后，先申请的线程先得到锁。性能较差一些，因为公平锁为了保证时间上的绝对顺序，上下文切换更频繁。
+
+**非公平锁**：锁被释放之后，后申请的线程可能会先获取到锁，是随机或者按照其他优先级排序的。性能更好，但可能会导致某些线程**永远无法获取到锁**。
+
+## 3、⭐️synchronized 和 ReentrantLock 有什么区别？
+
+### 3.1、两者都是可重入锁
+
+**可重入锁** 也叫递归锁，指的是线程可以再次获取自己的内部锁。比如一个线程获得了某个对象的锁，此时这个对象锁还没有释放，当其再次想要获取这个对象的锁的时候还是可以获取的，如果是不可重入锁的话，就会造成死锁。
+
+JDK 提供的所有现成的 `Lock` 实现类，包括 `synchronized` 关键字锁都是可重入的。
+
+在下面的代码中，`method1()` 和 `method2()`都被 `synchronized` 关键字修饰，`method1()`调用了`method2()`。
+
+```java
+public class SynchronizedDemo {
+    public synchronized void method1() {
+        System.out.println("方法1");
+        method2();
+    }
+
+    public synchronized void method2() {
+        System.out.println("方法2");
+    }
+}
+```
+
+由于 `synchronized`锁是可重入的，同一个线程在调用`method1()` 时可以直接获得当前对象的锁，执行 `method2()` 的时候可以再次获取这个对象的锁，不会产生死锁问题。假如`synchronized`是不可重入锁的话，由于该对象的锁已被当前线程所持有且无法释放，这就导致线程在执行 `method2()`时获取锁失败，会出现死锁问题。
+
+### 3.2、synchronized 依赖于 JVM 而 ReentrantLock 依赖于 API
+
+`synchronized` 是依赖于 JVM 实现的，前面我们也讲到了 虚拟机团队在 JDK1.6 为 `synchronized` 关键字进行了很多优化，但是这些优化都是在虚拟机层面实现的，并没有直接暴露给我们。
+
+`ReentrantLock` 是 JDK 层面实现的（也就是 API 层面，需要 `lock()` 和 `unlock()` 方法配合 `try/finally` 语句块来完成），所以我们可以通过查看它的源代码，来看它是如何实现的。
+
+### 3.3、ReentrantLock 比 synchronized 增加了一些高级功能
+
+相比`synchronized`，`ReentrantLock`增加了一些高级功能。主要来说主要有三点：
+
+- **等待可中断** : `ReentrantLock`提供了一种能够中断等待锁的线程的机制，通过 `lock.lockInterruptibly()` 来实现这个机制。也就是说当前线程在等待获取锁的过程中，如果其他线程中断当前线程「 `interrupt()` 」，当前线程就会抛出 `InterruptedException` 异常，可以捕捉该异常进行相应处理。
+
+  > 
+
+- **可实现公平锁** : `ReentrantLock`可以指定是公平锁还是非公平锁。而`synchronized`只能是非公平锁。所谓的公平锁就是先等待的线程先获得锁。`ReentrantLock`默认情况是非公平的，可以通过 `ReentrantLock`类的`ReentrantLock(boolean fair)`构造方法来指定是否是公平的。
+
+  > 
+
+- **通知机制更强大**：`ReentrantLock` 通过绑定多个 `Condition` 对象，可以实现分组唤醒和选择性通知。这解决了 `synchronized` 只能随机唤醒或全部唤醒的效率问题，为复杂的线程协作场景提供了强大的支持。
+
+  > 
+
+- **支持超时** ：`ReentrantLock` 提供了 `tryLock(timeout)` 的方法，可以指定等待获取锁的最长等待时间，如果超过了等待时间，就会获取锁失败，不会一直等待。
+
+  > 
+
+如果你想使用上述功能，那么选择 `ReentrantLock` 是一个不错的选择。
+
