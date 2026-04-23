@@ -1956,25 +1956,531 @@ public class SynchronizedDemo {
 
 `ReentrantLock` 是 JDK 层面实现的（也就是 API 层面，需要 `lock()` 和 `unlock()` 方法配合 `try/finally` 语句块来完成），所以我们可以通过查看它的源代码，来看它是如何实现的。
 
-### 3.3、ReentrantLock 比 synchronized 增加了一些高级功能
+### 3.3、ReentrantLock 比 synchronized 增加了一些高级功能（⭐️适合防止死锁）
 
 相比`synchronized`，`ReentrantLock`增加了一些高级功能。主要来说主要有三点：
 
-- **等待可中断** : `ReentrantLock`提供了一种能够中断等待锁的线程的机制，通过 `lock.lockInterruptibly()` 来实现这个机制。也就是说当前线程在等待获取锁的过程中，如果其他线程中断当前线程「 `interrupt()` 」，当前线程就会抛出 `InterruptedException` 异常，可以捕捉该异常进行相应处理。
+#### 3.3.1、**等待可中断**
 
-  > 
+ `ReentrantLock`提供了一种能够中断等待锁的线程的机制，通过 `lock.lockInterruptibly()` 来实现这个机制。也就是说当前线程在等待获取锁的过程中，如果其他线程中断当前线程「 `interrupt()` 」，当前线程就会抛出 `InterruptedException` 异常，可以捕捉该异常进行相应处理。
 
-- **可实现公平锁** : `ReentrantLock`可以指定是公平锁还是非公平锁。而`synchronized`只能是非公平锁。所谓的公平锁就是先等待的线程先获得锁。`ReentrantLock`默认情况是非公平的，可以通过 `ReentrantLock`类的`ReentrantLock(boolean fair)`构造方法来指定是否是公平的。
+> ## 一、示例
+>
+> ```java
+> import java.util.concurrent.locks.ReentrantLock;
+> 
+> public class InterruptibleLockDemo {
+> 
+>     private static ReentrantLock lock = new ReentrantLock();
+> 
+>     public static void main(String[] args) throws InterruptedException {
+> 
+>         Thread t1 = new Thread(() -> {
+>             try {
+>                 lock.lockInterruptibly();  // 可中断加锁
+>                 System.out.println("t1 获取到锁");
+> 
+>                 // 模拟长时间占用锁
+>                 Thread.sleep(5000);
+>                 
+>                 System.out.println("t1 结束任务");
+> 
+>             } catch (InterruptedException e) {
+>                 System.out.println("t1 被中断");
+>             } finally {
+>                 if (lock.isHeldByCurrentThread()) {
+>                     lock.unlock();
+>                 }
+>             }
+>         });
+> 
+>         Thread t2 = new Thread(() -> {
+>             try {
+>                 Thread.sleep(100); // 确保 t1 先拿到锁
+> 
+>                 System.out.println("t2 尝试获取锁...");
+>                 lock.lockInterruptibly();  // 关键点！
+> 
+>                 System.out.println("t2 获取到锁");
+> 
+>             } catch (InterruptedException e) {
+>                 System.out.println("t2 在等待锁时被中断！");
+>             } finally {
+>                 if (lock.isHeldByCurrentThread()) {
+>                     lock.unlock();
+>                 }
+>             }
+>         });
+> 
+>         t1.start();
+>         t2.start();
+> 
+>         // 主线程等待一会儿
+>         Thread.sleep(1000);
+>         System.out.println("主线程中断 t2");
+>         // 主线程 中断 t2 的等待
+>         t2.interrupt();
+>     }
+> }
+> ```
+>
+> ## 二、运行结果
+>
+> ```java
+> t1 获取到锁
+> t2 尝试获取锁...
+> 主线程中断 t2
+> t2 在等待锁时被中断！
+> t1 结束任务
+> ```
+>
+> ## 三、执行过程拆解
+>
+> ### 1️⃣ t1 先拿到锁
+>
+> ```java
+> t1 → lock.lockInterruptibly() → 成功
+> ```
+>
+> ### 2️⃣ t2 尝试获取锁
+>
+> ```java
+> t2 → lock.lockInterruptibly()
+> ```
+>
+> 👉 但锁被 t1 占用，所以：
+>
+> ➡️ t2 **进入等待队列（阻塞）**
+>
+> ### 3️⃣ 主线程中断 t2
+>
+> ```java
+> t2.interrupt();
+> ```
+>
+> 👉 此时关键来了：
+>
+> - t2 正在 **等待锁**
+> - 使用的是 `lockInterruptibly()`
+>
+> ➡️ JVM 会做：
+>
+> ```java
+> 检测到中断 → 立即停止等待 → 抛出 InterruptedException
+> ```
+>
+> ### 4️⃣ t2 捕获异常并退出
+>
+> ```java
+> catch (InterruptedException e) {
+>     System.out.println("t2 在等待锁时被中断！");
+> }
+> ```
+>
+> 👉 不再继续等锁，线程“优雅退出”
+>
+> ## ✅ 四、如果换成 lock() 会怎样？
+>
+> 把这行：
+>
+> ```
+> lock.lockInterruptibly();
+> ```
+>
+> 改成：
+>
+> ```
+> lock.lock();
+> ```
+>
+> 结果会变成：
+>
+> ```java
+> t1 获取到锁
+> t2 尝试获取锁
+> 主线程中断 t2
+> t1 结束任务
+> t2 获取到锁
+> ```
+>
+> 👉 说明：
+>
+> - `lock()` **不会响应中断**
+> -  👉 线程会“死等”直到拿到锁
+>
+> ## ✅ 六、为什么这个特性很重要？
+>
+> ### 1️⃣ 避免死锁/长时间阻塞
+>
+> 比如：
+>
+> - 线程卡在锁上
+> - 外部决定“取消任务”
+>
+> 👉 可以直接：
+>
+> ```
+> thread.interrupt();
+> ```
+>
+> 让它退出等待
+>
+> ------
+>
+> ### 2️⃣ 实现“可取消任务”
+>
+> 常见场景：
+>
+> - 线程池任务取消
+> - 超时控制
+> - 用户主动终止操作
 
-  > 
+#### 3.3.2、**可实现公平锁**
 
-- **通知机制更强大**：`ReentrantLock` 通过绑定多个 `Condition` 对象，可以实现分组唤醒和选择性通知。这解决了 `synchronized` 只能随机唤醒或全部唤醒的效率问题，为复杂的线程协作场景提供了强大的支持。
+ `ReentrantLock`可以指定是公平锁还是非公平锁。而`synchronized`只能是非公平锁。所谓的公平锁就是先等待的线程先获得锁。`ReentrantLock`默认情况是非公平的，可以通过 `ReentrantLock`类的`ReentrantLock(boolean fair)`构造方法来指定是否是公平的。
 
-  > 
+> ## ✔ 一、示例代码
+>
+> ```java
+> import java.util.concurrent.locks.ReentrantLock;
+> 
+> public class FairLockDemo {
+> 
+>     // 改这里：true = 公平锁，false = 非公平锁
+>     private static ReentrantLock lock = new ReentrantLock(true);
+> 
+>     public static void main(String[] args) {
+> 
+>         for (int i = 0; i < 5; i++) {
+>             Thread t = new Thread(new Task(), "线程-" + i);
+>             t.start();
+>         }
+>     }
+> 
+>     static class Task implements Runnable {
+>         @Override
+>         public void run() {
+>             System.out.println(Thread.currentThread().getName() + " 尝试获取锁");
+> 
+>             lock.lock();
+>             try {
+>                 System.out.println(Thread.currentThread().getName() + " 获取到锁");
+> 
+>                 // 模拟执行时间
+>                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+> 
+>             } finally {
+>                 lock.unlock();
+>             }
+>         }
+>     }
+> }
+> ```
+>
+> ## 二、运行结果分析
+>
+> ### 🎯情况1：公平锁（`new ReentrantLock(true)`）
+>
+> ```java
+> 线程-0 尝试获取锁
+> 线程-1 尝试获取锁
+> 线程-2 尝试获取锁
+> 线程-3 尝试获取锁
+> 线程-4 尝试获取锁
+> 
+> 线程-0 获取到锁
+> 线程-1 获取到锁
+> 线程-2 获取到锁
+> 线程-3 获取到锁
+> 线程-4 获取到锁
+> ```
+>
+> 👉 特点：
+>
+> - 基本按**启动顺序执行**
+> - 谁先排队谁先执行
+> - **不会插队**
+>
+> ### 🎯 情况2：非公平锁（默认 new ReentrantLock(false)）
+>
+> ```java
+> 线程-0 获取到锁
+> 线程-3 获取到锁
+> 线程-1 获取到锁
+> 线程-4 获取到锁
+> 线程-2 获取到锁
+> ```
+>
+> 👉 特点：
+>
+> - 顺序**乱序**
+>
+> - 可能出现：
+>
+>   ```
+>   后来的线程抢在前面
+>   ```
+>
+> - **存在插队（抢占）**
+>
+> ## ✅ 三、为什么会这样？
+>
+> ### ✔ 公平锁机制
+>
+> ```
+> 请求锁 → 进入队列 → 按顺序获取
+> ```
+>
+> 👉 JVM 内部维护一个 FIFO 队列
+>
+> ------
+>
+> ### ✔ 非公平锁机制
+>
+> ```
+> 新线程来了 → 先尝试抢锁（CAS）
+> ```
+>
+> 👉 即使队列里有人，也可能直接抢到锁
+>
+> ## ✅ 四、为什么默认是“非公平锁”？
+>
+> 👉 因为性能更高
+>
+> 原因：
+>
+> 1. 减少线程切换
+> 2. 减少唤醒开销
+> 3. CPU 利用率更高
+>
+> 👉 官方结论：
+>
+> > **非公平锁吞吐量 > 公平锁**
+>
+> ## ⚠️ 五、什么时候用公平锁？
+>
+> 适合场景：
+>
+> - 任务必须按顺序执行
+> - 避免线程“饿死”（某些线程一直拿不到锁）
+>
+> 例如：
+>
+> - 排队系统
+> - 资源调度系统
+>
+> ## ❌ 六、什么时候不要用？
+>
+> 高并发场景：
+>
+> 👉 **优先用非公平锁**
+>
+> 否则：
+>
+> - 性能下降明显
+> - 吞吐量降低
 
-- **支持超时** ：`ReentrantLock` 提供了 `tryLock(timeout)` 的方法，可以指定等待获取锁的最长等待时间，如果超过了等待时间，就会获取锁失败，不会一直等待。
+#### 3.3.3、**通知机制更强大**
 
-  > 
+`ReentrantLock` 通过绑定多个 `Condition` 对象，可以实现分组唤醒和选择性通知。这解决了 `synchronized` 只能随机唤醒或全部唤醒的效率问题，为复杂的线程协作场景提供了强大的支持。
+
+> 用一个**非常典型的生产者-消费者升级版案例**来讲清楚👇
+>
+> ## ✅ 一、问题背景（为什么需要多个 Condition）
+>
+> 假设一个仓库：
+>
+> - 容量有限
+> - 有两类线程：
+>   - 🧵 生产者（Producer）
+>   - 🧵 消费者（Consumer）
+>
+> ------
+>
+> ### ❌ 用 `synchronized` 的问题
+>
+> ```
+> notify() → 随机唤醒（可能唤醒同类线程 ❌）
+> notifyAll() → 全部唤醒（性能差 ❌）
+> ```
+>
+> 👉 举个问题场景：
+>
+> ```
+> 仓库满了 → 生产者 wait()
+> 然后 notify() → 结果唤醒的还是生产者 😅
+> ```
+>
+> ➡️ **无效唤醒（性能浪费）**
+>
+> ## ✅ 二、用 ReentrantLock + Condition（精准唤醒）
+>
+> 👉 思路：
+>
+> - 用 两个 Condition
+>   - `notFull` → 唤醒生产者
+>   - `notEmpty` → 唤醒消费者
+>
+> ## ✅ 三、完整案例代码
+>
+> ```java
+> import java.util.LinkedList;
+> import java.util.Queue;
+> import java.util.concurrent.locks.Condition;
+> import java.util.concurrent.locks.ReentrantLock;
+> 
+> public class ConditionDemo {
+> 
+>     private final Queue<Integer> queue = new LinkedList<>();
+>     private final int capacity = 5;
+> 
+>     private final ReentrantLock lock = new ReentrantLock();
+> 
+>     // 两个条件队列（关键）
+>     private final Condition notFull = lock.newCondition();	// 生产者队列
+>     private final Condition notEmpty = lock.newCondition();	// 消费者队列
+> 
+>     // 生产
+>     public void produce(int value) throws InterruptedException {
+>         lock.lock();
+>         try {
+>             while (queue.size() == capacity) {
+>                 System.out.println("队列满，生产者等待...");
+>                 notFull.await();  // 生产者等待“队列不满”
+>             }
+> 
+>             queue.offer(value);
+>             System.out.println("生产：" + value);
+> 
+>             // 精准唤醒消费者
+>             notEmpty.signal();
+> 
+>         } finally {
+>             lock.unlock();
+>         }
+>     }
+> 
+>     // 消费
+>     public int consume() throws InterruptedException {
+>         lock.lock();
+>         try {
+>             while (queue.isEmpty()) {
+>                 System.out.println("队列空，消费者等待...");
+>                 notEmpty.await(); // 等待“队列不空”
+>             }
+> 
+>             int value = queue.poll();
+>             System.out.println("消费：" + value);
+> 
+>             // 精准唤醒生产者
+>             notFull.signal();
+> 
+>             return value;
+> 
+>         } finally {
+>             lock.unlock();
+>         }
+>     }
+> 
+>     public static void main(String[] args) {
+> 
+>         ConditionDemo demo = new ConditionDemo();
+> 
+>         // 生产者线程
+>         new Thread(() -> {
+>             int i = 0;
+>             while (true) {
+>                 try {
+>                     demo.produce(i++);
+>                     Thread.sleep(300);
+>                 } catch (InterruptedException ignored) {}
+>             }
+>         }).start();
+> 
+>         // 消费者线程
+>         new Thread(() -> {
+>             while (true) {
+>                 try {
+>                     demo.consume();
+>                     Thread.sleep(500);
+>                 } catch (InterruptedException ignored) {}
+>             }
+>         }).start();
+>     }
+> }
+> ```
+>
+> ## ✅ 四、核心机制解析
+>
+> ### 🎯 关键点1：多个 Condition（本质）
+>
+> ```
+> Condition notFull = lock.newCondition();
+> Condition notEmpty = lock.newCondition();
+> ```
+>
+> 👉 相当于：
+>
+> ```
+> 两个等待队列：
+> - 生产者队列
+> - 消费者队列
+> ```
+>
+> ------
+>
+> ### 🎯 关键点2：分组等待
+>
+> ```
+> notFull.await();   // 生产者只在这里等
+> notEmpty.await();  // 消费者只在这里等
+> ```
+>
+> 👉 不会混在一起
+>
+> ------
+>
+> ### 🎯 关键点3：精准唤醒
+>
+> ```
+> notEmpty.signal(); // 只唤醒消费者
+> notFull.signal();  // 只唤醒生产者
+> ```
+>
+> 👉 不会出现：唤醒错人 ❌
+>
+> ## ✅ 五、业务逻辑解析
+>
+> ### ✅ 问题1：为什么有两个 while？
+>
+> 
+>
+> ## ⚖️ 六、对比 synchronized
+>
+> | 特性     | synchronized        | ReentrantLock + Condition |
+> | -------- | ------------------- | ------------------------- |
+> | 等待队列 | 只有一个            | 多个（可分组）            |
+> | 唤醒方式 | notify（随机）      | signal（精准）            |
+> | 全部唤醒 | notifyAll（开销大） | signalAll（可控）         |
+> | 灵活性   | ❌ 低                | ✅ 高                      |
+>
+> ------
+>
+> ## 🔥 六、面试级总结
+>
+> 如果面试官问你：
+>
+> 👉 为什么 Condition 更强？
+>
+> 可以这样答：
+>
+> > `Condition` 可以绑定多个等待队列，实现线程的分组管理。不同线程可以在不同的 Condition 上等待，并通过 `signal()` 精准唤醒指定类型的线程，避免了 `synchronized` 中 `notify()` 的随机唤醒和 `notifyAll()` 的性能浪费问题。
+
+#### 3.3.4、**支持超时**
+
+`ReentrantLock` 提供了 `tryLock(timeout)` 的方法，可以指定等待获取锁的最长等待时间，如果超过了等待时间，就会获取锁失败，不会一直等待。
+
+> 
 
 如果你想使用上述功能，那么选择 `ReentrantLock` 是一个不错的选择。
 
