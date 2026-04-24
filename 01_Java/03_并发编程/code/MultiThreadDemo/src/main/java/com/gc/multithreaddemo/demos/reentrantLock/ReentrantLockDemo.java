@@ -11,8 +11,8 @@ public class ReentrantLockDemo {
 
         Thread t1 = new Thread(() -> {
             try {
-                // reentrantLock.lockInterruptibly();
-                reentrantLock.lock();
+                reentrantLock.lockInterruptibly();
+                // reentrantLock.lock();
                 System.out.println("t1 获取到锁");
 
                 // 模拟线程占用
@@ -33,8 +33,8 @@ public class ReentrantLockDemo {
                 Thread.sleep(1000);     // 确保t1获取到锁
 
                 System.out.println("t2 尝试获取锁");
-                // reentrantLock.lockInterruptibly();
-                reentrantLock.lock();
+                reentrantLock.lockInterruptibly();
+                // reentrantLock.lock();
                 System.out.println("t2 获取到锁");
             }catch (InterruptedException e){
                 System.out.println("t2 在等待时被中断");
@@ -50,8 +50,8 @@ public class ReentrantLockDemo {
 
         // 主线程等待一会儿，中断t2的等待
         Thread.sleep(1000);
-        System.out.println("主线程中断 t2");
-        t2.interrupt();
+        System.out.println("主线程中断 t1");
+        t1.interrupt();
 
     }
 }

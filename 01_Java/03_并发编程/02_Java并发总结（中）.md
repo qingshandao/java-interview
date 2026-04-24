@@ -1962,7 +1962,7 @@ public class SynchronizedDemo {
 
 #### 3.3.1、**等待可中断**
 
- `ReentrantLock`提供了一种能够中断等待锁的线程的机制，通过 `lock.lockInterruptibly()` 来实现这个机制。也就是说当前线程在等待获取锁的过程中，如果其他线程中断当前线程「 `interrupt()` 」，当前线程就会抛出 `InterruptedException` 异常，可以捕捉该异常进行相应处理。
+ `ReentrantLock`提供了一种能够中断等待锁的线程的机制，通过 `lock.lockInterruptibly()` 来实现这个机制。也就是说当前线程 **在等待获取锁** 的过程中，如果其他线程中断当前线程「 `interrupt()` 」，当前线程就会抛出 `InterruptedException` 异常，可以捕捉该异常进行相应处理，但对于**获取到锁**的进程**不会**被中断。
 
 > ## 一、示例
 >
@@ -1971,56 +1971,56 @@ public class SynchronizedDemo {
 > 
 > public class InterruptibleLockDemo {
 > 
->     private static ReentrantLock lock = new ReentrantLock();
+>  private static ReentrantLock lock = new ReentrantLock();
 > 
->     public static void main(String[] args) throws InterruptedException {
+>  public static void main(String[] args) throws InterruptedException {
 > 
->         Thread t1 = new Thread(() -> {
->             try {
->                 lock.lockInterruptibly();  // 可中断加锁
->                 System.out.println("t1 获取到锁");
+>      Thread t1 = new Thread(() -> {
+>          try {
+>              lock.lockInterruptibly();  // 可中断加锁
+>              System.out.println("t1 获取到锁");
 > 
->                 // 模拟长时间占用锁
->                 Thread.sleep(5000);
->                 
->                 System.out.println("t1 结束任务");
+>              // 模拟长时间占用锁（但 sleep 是一个可中断阻塞方法，收到interrupt，sleep 立刻抛 InterruptedException，和lockInterruptibly 没关系）
+>              Thread.sleep(5000);
 > 
->             } catch (InterruptedException e) {
->                 System.out.println("t1 被中断");
->             } finally {
->                 if (lock.isHeldByCurrentThread()) {
->                     lock.unlock();
->                 }
->             }
->         });
+>              System.out.println("t1 结束任务");
 > 
->         Thread t2 = new Thread(() -> {
->             try {
->                 Thread.sleep(100); // 确保 t1 先拿到锁
+>          } catch (InterruptedException e) {
+>              System.out.println("t1 被中断");
+>          } finally {
+>              if (lock.isHeldByCurrentThread()) {
+>                  lock.unlock();
+>              }
+>          }
+>      });
 > 
->                 System.out.println("t2 尝试获取锁...");
->                 lock.lockInterruptibly();  // 关键点！
+>      Thread t2 = new Thread(() -> {
+>          try {
+>              Thread.sleep(100); // 确保 t1 先拿到锁
 > 
->                 System.out.println("t2 获取到锁");
+>              System.out.println("t2 尝试获取锁...");
+>              lock.lockInterruptibly();  // 关键点！
 > 
->             } catch (InterruptedException e) {
->                 System.out.println("t2 在等待锁时被中断！");
->             } finally {
->                 if (lock.isHeldByCurrentThread()) {
->                     lock.unlock();
->                 }
->             }
->         });
+>              System.out.println("t2 获取到锁");
 > 
->         t1.start();
->         t2.start();
+>          } catch (InterruptedException e) {
+>              System.out.println("t2 在等待锁时被中断！");
+>          } finally {
+>              if (lock.isHeldByCurrentThread()) {
+>                  lock.unlock();
+>              }
+>          }
+>      });
 > 
->         // 主线程等待一会儿
->         Thread.sleep(1000);
->         System.out.println("主线程中断 t2");
->         // 主线程 中断 t2 的等待
->         t2.interrupt();
->     }
+>      t1.start();
+>      t2.start();
+> 
+>      // 主线程等待一会儿
+>      Thread.sleep(1000);
+>      System.out.println("主线程中断 t2");
+>      // 主线程 中断 t2 的等待
+>      t2.interrupt();
+>  }
 > }
 > ```
 >
@@ -2107,6 +2107,77 @@ public class SynchronizedDemo {
 >
 > - `lock()` **不会响应中断**
 > -  👉 线程会“死等”直到拿到锁
+>
+> ## ✅ 五、示例代码2
+>
+> `lockInterruptibly()` 会让获取锁的线程在阻塞等待的过程中可以响应中断，即当前线程在获取锁的时候，发现锁被其他线程持有，就会阻塞等待。
+>
+> 在阻塞等待的过程中，如果其他线程中断当前线程 `interrupt()` ，就会抛出 `InterruptedException` 异常，可以捕获该异常，做一些处理操作。
+>
+> ```java
+> public class MyRentrantlock {
+>     Thread t = new Thread() {
+>         @Override
+>         public void run() {
+>             ReentrantLock r = new ReentrantLock();
+>             // 1.1、第一次尝试获取锁，可以获取成功
+>             r.lock();
+> 
+>             // 1.2、此时锁的重入次数为 1
+>             System.out.println("lock() : lock count :" + r.getHoldCount());
+> 
+>             // 2、中断当前线程，通过 Thread.currentThread().isInterrupted() 可以看到当前线程的中断状态为 true
+>             interrupt();
+>             System.out.println("Current thread is intrupted");
+> 
+>             // 3.1、尝试获取锁，可以成功获取
+>             r.tryLock();
+>             // 3.2、此时锁的重入次数为 2
+>             System.out.println("tryLock() on intrupted thread lock count :" + r.getHoldCount());
+>             try {
+>                 // 4、打印线程的中断状态为 true，那么调用 lockInterruptibly() 方法就会抛出 InterruptedException 异常
+>                 System.out.println("Current Thread isInterrupted:" + Thread.currentThread().isInterrupted());
+>                 r.lockInterruptibly();
+>                 System.out.println("lockInterruptibly() --Not executable statement" + r.getHoldCount());
+>             } catch (InterruptedException e) {
+>                 r.lock();
+>                 System.out.println("Error");
+>             } finally {
+>                 r.unlock();
+>             }
+> 
+>             // 5、打印锁的重入次数，可以发现 lockInterruptibly() 方法并没有成功获取到锁
+>             System.out.println("lockInterruptibly() not able to Acqurie lock: lock count :" + r.getHoldCount());
+> 
+>             r.unlock();
+>             System.out.println("lock count :" + r.getHoldCount());
+>             r.unlock();
+>             System.out.println("lock count :" + r.getHoldCount());
+>         }
+>     };
+>     public static void main(String str[]) {
+>         MyRentrantlock m = new MyRentrantlock();
+>         m.t.start();
+>     }
+> }
+> ```
+>
+> 输出：
+>
+> ```java
+> lock() : lock count :1
+> Current thread is intrupted
+> tryLock() on intrupted thread lock count :2
+> Current Thread isInterrupted:true
+> Error
+> lockInterruptibly() not able to Acqurie lock: lock count :2
+> lock count :1
+> lock count :0
+> ```
+>
+> 
+>
+> 
 >
 > ## ✅ 六、为什么这个特性很重要？
 >
@@ -2331,19 +2402,20 @@ public class SynchronizedDemo {
 > 
 > public class ConditionDemo {
 > 
->     private final Queue<Integer> queue = new LinkedList<>();
+>     private final Queue<Integer> queue = new LinkedList<>();	// 防止引用被其它线程修改
 >     private final int capacity = 5;
 > 
 >     private final ReentrantLock lock = new ReentrantLock();
 > 
 >     // 两个条件队列（关键）
->     private final Condition notFull = lock.newCondition();	// 生产者队列
->     private final Condition notEmpty = lock.newCondition();	// 消费者队列
+>     private final Condition notFull = lock.newCondition();	// 生产者线程等待队列
+>     private final Condition notEmpty = lock.newCondition();	// 消费者线程等待队列
 > 
 >     // 生产
 >     public void produce(int value) throws InterruptedException {
 >         lock.lock();
 >         try {
+>             // ⭐️醒来不代表条件成立，必须重新检查
 >             while (queue.size() == capacity) {
 >                 System.out.println("队列满，生产者等待...");
 >                 notFull.await();  // 生产者等待“队列不满”
@@ -2364,6 +2436,7 @@ public class SynchronizedDemo {
 >     public int consume() throws InterruptedException {
 >         lock.lock();
 >         try {
+>             // ⭐️醒来不代表条件成立，必须重新检查
 >             while (queue.isEmpty()) {
 >                 System.out.println("队列空，消费者等待...");
 >                 notEmpty.await(); // 等待“队列不空”
@@ -2453,9 +2526,160 @@ public class SynchronizedDemo {
 >
 > ### ✅ 问题1：为什么有两个 while？
 >
-> 
+> 外层 while 控制业务循环，内层 while 用于并发控制。内层必须使用 while 而不是 if，是为了防止虚假唤醒以及被其他线程抢占资源后条件失效的问题。
 >
-> ## ⚖️ 六、对比 synchronized
+> #### 🎯 两个 while 本质完全不同
+>
+> ##### ✅ 外层 while（业务循环）
+>
+> ```
+> 一直生产 / 一直消费
+> ```
+>
+> 👉 作用：
+>
+> - 控制线程生命周期
+> - 不是并发控制
+>
+> ------
+>
+> ##### ✅ 内层 while（并发安全）
+>
+> ```
+> 条件不满足 → 等待
+> 被唤醒 → 再检查条件
+> ```
+>
+> 👉 这是关键！！！
+>
+> ### ❗⭐️ 问题2： 为什么不能用 if，而必须用 while？
+>
+> 因为存在两个问题：
+>
+> ------
+>
+> #### 🚨 1️⃣ “虚假唤醒”（Spurious Wakeup）
+>
+> 线程可能**没有被 signal，也会醒来**
+>
+> 👉 JVM 规范允许
+>
+> ------
+>
+> #### 🚨 2️⃣ “条件已被别人抢走”
+>
+> 例如：
+>
+> ```
+> 1. 消费者A await
+> 2. 被 signal 唤醒
+> 3. 还没执行
+> 4. 消费者B 抢先消费了
+> 5. A 醒来时 → 队列已经空了
+> ```
+>
+> 👉 ⭐️核心思想：**<u>醒来不代表条件成立，必须重新检查</u>**
+>
+> ### ✅ 问题3：signal 后线程从哪里继续？
+>
+> #### 🎯 执行流程（非常关键）
+>
+> ##### 1️⃣ signal 只是“移动线程”
+>
+> ```
+> Condition队列 → AQS同步队列
+> ```
+>
+> 👉 线程还没真正运行！
+>
+> ------
+>
+> ##### 2️⃣ 被唤醒线程要重新竞争锁
+>
+> ```
+> 谁先抢到锁 → 谁执行
+> ```
+>
+> ------
+>
+> ##### 3️⃣ 拿到锁后，从哪里继续？
+>
+> 👉 从 await 返回的位置继续！
+>
+> ```
+> notEmpty.await();  // ← 从这里返回
+> ```
+>
+> ------
+>
+> ##### 4️⃣ 然后继续执行 while
+>
+> ```
+> while (queue.isEmpty()) {
+>     notEmpty.await();  // ← 返回后会重新判断
+> }
+> ```
+>
+> ## ✅ 六、lock 的真正作用（重点）
+>
+> ### 🎯 作用1：保证“检查 + 操作”原子性
+>
+> ```java
+> lock.lock();
+> try {
+>     while (queue.isEmpty()) {
+>         await();
+>     }
+>     queue.poll();
+> } finally {
+>     lock.unlock();
+> }
+> ```
+>
+> 👉 整个过程不会被打断
+>
+> ### 🎯 作用2：保证 await / signal 正确配合
+>
+> 👉 这是最关键的
+>
+> #### 为什么 await 必须在 lock 内？
+>
+> 因为它内部会：
+>
+> ```
+> 1. 释放锁
+> 2. 进入等待队列
+> ```
+>
+> 👉 这两个操作是**原子完成的**
+>
+> #### 如果没有锁，会变成：
+>
+> ```
+> 释放锁 ❌
+> 进入等待 ❌
+> ```
+>
+> 👉 中间可能被插入线程 → 导致信号丢失
+>
+> ### 🎯 作用3：保证 signal 不会“白发”
+>
+> ```
+> lock.lock();
+> try {
+>     queue.offer(x);
+>     notEmpty.signal();
+> } finally {
+>     lock.unlock();
+> }
+> ```
+>
+> 👉 因为：
+>
+> - signal 和状态修改在同一锁内
+> - 不会出现“先 signal 后 await”的错位
+>
+> ## ⚖️ 七、对比 synchronized
 >
 > | 特性     | synchronized        | ReentrantLock + Condition |
 > | -------- | ------------------- | ------------------------- |
@@ -2468,19 +2692,341 @@ public class SynchronizedDemo {
 >
 > ## 🔥 六、面试级总结
 >
-> 如果面试官问你：
->
-> 👉 为什么 Condition 更强？
+> ### 👉 为什么 Condition 更强？
 >
 > 可以这样答：
 >
 > > `Condition` 可以绑定多个等待队列，实现线程的分组管理。不同线程可以在不同的 Condition 上等待，并通过 `signal()` 精准唤醒指定类型的线程，避免了 `synchronized` 中 `notify()` 的随机唤醒和 `notifyAll()` 的性能浪费问题。
+>
+> ### 🔥 六、面试级回答（推荐背）
+>
+> > 在生产者消费者模型中，`lock.lock()` 的作用不仅是保证共享资源的线程安全，更重要的是保证 “**条件检查**、**状态修改 和 线程通信**”这三步操作的原子性。同时它确保了 `await()` 和 `signal()` 的正确配合，避免信号丢失问题。如果没有锁，可能会出现数据竞争以及线程永久阻塞等严重问题。
 
 #### 3.3.4、**支持超时**
 
 `ReentrantLock` 提供了 `tryLock(timeout)` 的方法，可以指定等待获取锁的最长等待时间，如果超过了等待时间，就会获取锁失败，不会一直等待。
 
+此功能在以下几种场景中非常有用：
+
+- **防止死锁：** 在复杂的锁场景中，`tryLock(timeout)` 可以通过允许线程在合理的时间内放弃并重试来帮助防止死锁。
+- **提高响应速度：** 防止线程无限期阻塞。
+- **处理时间敏感的操作：** 对于具有严格时间限制的操作，`tryLock(timeout)` 允许线程在无法及时获取锁时继续执行替代操作。
+
+> ## ✅ 一、先看核心用法
+>
+> ```
+> boolean success = lock.tryLock(2, TimeUnit.SECONDS);
+> ```
+>
+> 👉 含义：
+>
+> #### 🎯 情况1：锁是空闲的
+>
+> ```
+> t1：tryLock()
+> → 第一次尝试成功
+> → 立即返回 true
+> → ❗ 不会等待2秒
+> ```
+>
+> ------
+>
+> #### 🎯 情况2：锁被占用
+>
+> ```
+> t1：tryLock()
+> → 第一次尝试失败
+> → 进入等待队列
+> → 最多等2秒
+>     ├─ 期间锁释放 → 抢到锁 → 返回 true
+>     └─ 一直没抢到 → 超时 → 返回 false
+> ```
+>
+> ## ✅ 二、案例1：直观演示“超时失败”
+>
+> ### ✔ 示例代码
+>
+> ```java
+> import java.util.concurrent.TimeUnit;
+> import java.util.concurrent.locks.ReentrantLock;
 > 
+> public class TryLockTimeoutDemo {
+> 
+>     private static ReentrantLock lock = new ReentrantLock();
+> 
+>     public static void main(String[] args) {
+> 
+>         Thread t1 = new Thread(() -> {
+>             lock.lock();
+>             try {
+>                 System.out.println("t1 获取到锁，执行5秒");
+>                 sleep(5000);
+>             } finally {
+>                 lock.unlock();
+>             }
+>         });
+> 
+>         Thread t2 = new Thread(() -> {
+>             try {
+>                 System.out.println("t2 尝试获取锁（最多等2秒）...");
+> 
+>                 boolean success = lock.tryLock(2, TimeUnit.SECONDS);
+> 
+>                 if (success) {
+>                     try {
+>                         System.out.println("t2 获取到锁");
+>                     } finally {
+>                         lock.unlock();
+>                     }
+>                 } else {
+>                     System.out.println("t2 等待超时，放弃获取锁");
+>                 }
+> 
+>             } catch (InterruptedException e) {
+>                 System.out.println("t2 被中断");
+>             }
+>         });
+> 
+>         t1.start();
+>         sleep(100); // 确保 t1 先拿锁
+>         t2.start();
+>     }
+> 
+>     static void sleep(long ms) {
+>         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
+>     }
+> }
+> ```
+>
+> ### ✔ 运行结果（典型）
+>
+> ```java
+> t1 获取到锁，执行5秒
+> t2 尝试获取锁（最多等2秒）...
+> t2 等待超时，放弃获取锁
+> ```
+>
+> ## ✅ 三、案例2：实际应用（避免死锁）
+>
+> 这个才是面试重点👇
+>
+> ```java
+> import java.util.concurrent.TimeUnit;
+> import java.util.concurrent.locks.ReentrantLock;
+> 
+> public class DeadlockAvoidWithTryLock {
+> 
+>     static ReentrantLock lockA = new ReentrantLock();
+>     static ReentrantLock lockB = new ReentrantLock();
+> 
+>     public static void main(String[] args) {
+> 
+>         // 线程1：先A再B
+>         new Thread(() -> {
+>             while (true) {
+>                 boolean gotA = false;
+>                 boolean gotB = false;
+> 
+>                 try {
+>                     gotA = lockA.tryLock(1, TimeUnit.SECONDS);
+>                     if (gotA) {
+>                         System.out.println("t1 拿到A");
+> 
+>                         sleep(100);
+> 
+>                         gotB = lockB.tryLock(1, TimeUnit.SECONDS);
+>                         if (gotB) {
+>                             System.out.println("t1 拿到B，执行成功");
+>                             break;
+>                         } else {
+>                             System.out.println("t1 拿不到B，释放A重试");
+>                         }
+>                     }
+>                 } catch (InterruptedException e) {
+>                     return;
+>                 } finally {
+>                     if (gotB) lockB.unlock();
+>                     if (gotA) lockA.unlock();
+>                 }
+> 
+>                 sleep(100);
+>             }
+>         }, "t1").start();
+> 
+>         // 线程2：先B再A（顺序反了）
+>         new Thread(() -> {
+>             while (true) {
+>                 boolean gotB = false;
+>                 boolean gotA = false;
+> 
+>                 try {
+>                     gotB = lockB.tryLock(1, TimeUnit.SECONDS);
+>                     if (gotB) {
+>                         System.out.println("t2 拿到B");
+> 
+>                         sleep(100);
+> 
+>                         gotA = lockA.tryLock(1, TimeUnit.SECONDS);
+>                         if (gotA) {
+>                             System.out.println("t2 拿到A，执行成功");
+>                             break;
+>                         } else {
+>                             System.out.println("t2 拿不到A，释放B重试");
+>                         }
+>                     }
+>                 } catch (InterruptedException e) {
+>                     return;
+>                 } finally {
+>                     if (gotA) lockA.unlock();
+>                     if (gotB) lockB.unlock();
+>                 }
+> 
+>                 sleep(100);
+>             }
+>         }, "t2").start();
+>     }
+> 
+>     static void sleep(long ms) {
+>         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
+>     }
+> }
+> ```
+>
+> ## 🧠 一、为什么这样就不会死锁？
+>
+> 死锁需要4个条件，其中最关键的是：
+>
+> ```
+> 1️⃣ 持有锁（Hold）
+> 2️⃣ 等待锁（Wait）
+> 3️⃣ 不释放（No preemption）
+> 4️⃣ 循环等待（Cycle）
+> ```
+>
+> ------
+>
+> ### tryLock 破坏了哪一个？
+>
+> 👉 破坏了：
+>
+> ```
+> ❌ 持有 + 无限等待
+> ```
+>
+> 因为：
+>
+> ```java
+> 拿不到 → 会释放已有锁
+> ```
+>
+> ## ⚠️ 二、一个进阶点（面试加分）
+>
+> 这种方式可能出现：
+>
+> ```
+> 活锁（Livelock）
+> ```
+>
+> 👉 两个线程都很“礼貌”：
+>
+> ```
+> 你拿 → 我放  
+> 我拿 → 你放  
+> ```
+>
+> ➡️ 一直让来让去
+>
+> ------
+>
+> 👉 解决方法：
+>
+> ```
+> sleep(随机时间)
+> ```
+
+
 
 如果你想使用上述功能，那么选择 `ReentrantLock` 是一个不错的选择。
+
+
+
+## 4、可中断锁和不可中断锁有什么区别？
+
+它们的区别在于：**线程在<u>等待锁</u>的过程中被阻塞时，是否能够因为中断而提前放弃等待。**
+
+- 不可中断锁：线程在等待锁期间即使收到中断信号，也不会退出阻塞状态，而是一直等待直到获得锁。中断状态会被保留，但不会影响锁的获取过程。 
+
+  - `synchronized` 属于典型的不可中断锁。
+  - ⚠`ReentrantLock#lock()` 也是不可中断的。
+
+- 可中断锁：线程在等待锁的过程中如果收到中断信号，会立即停止等待并抛出 
+
+  ```
+  InterruptedException
+  ```
+
+  从而有机会进行取消或错误处理。 
+
+  - `ReentrantLock#lockInterruptibly()` 实现了可中断锁。
+  - `ReentrantLock#tryLock(long time, TimeUnit unit)` （带超时的尝试获取）也是可中断的。
+
+# 五、ReentrantReadWriteLock
+
+`ReentrantReadWriteLock` 在实际项目中使用的并不多，面试中也问的比较少，简单了解即可。JDK 1.8 引入了性能更好的读写锁 `StampedLock` 。
+
+## 1、ReentrantReadWriteLock 是什么？
+
+`ReentrantReadWriteLock` 实现了 `ReadWriteLock` ，是一个可重入的读写锁，既可以保证多个线程同时读的效率，同时又可以保证有写入操作时的线程安全。
+
+```java
+public class ReentrantReadWriteLock
+        implements ReadWriteLock, java.io.Serializable{
+}
+
+
+public interface ReadWriteLock {
+    Lock readLock();
+    Lock writeLock();
+}
+```
+
+- 一般锁进行并发控制的规则：读读互斥、读写互斥、写写互斥。
+- 读写锁进行并发控制的规则：读读不互斥、读写互斥、写写互斥（只有读读不互斥）。
+
+`ReentrantReadWriteLock` 其实是两把锁，一把是 `WriteLock` (写锁)，一把是 `ReadLock`（读锁） 。读锁是共享锁，写锁是独占锁。读锁可以被同时读，可以同时被多个线程持有，而写锁最多只能同时被一个线程持有。
+
+和 `ReentrantLock` 一样，`ReentrantReadWriteLock` 底层也是基于 AQS 实现的。
+
+![](./assets/reentrantreadwritelock-class-diagram.png)`ReentrantReadWriteLock` 也支持公平锁和非公平锁，默认使用非公平锁，可以通过构造器来显式地指定。
+
+```java
+// 传入一个 boolean 值，true 时为公平锁，false 时为非公平锁
+public ReentrantReadWriteLock(boolean fair) {
+    sync = fair ? new FairSync() : new NonfairSync();
+    readerLock = new ReadLock(this);
+    writerLock = new WriteLock(this);
+}
+```
+
+## 2、ReentrantReadWriteLock 适合什么场景？
+
+由于 `ReentrantReadWriteLock` 既可以保证多个线程同时读的效率，同时又可以保证有写入操作时的线程安全。因此，在 **读多写少** 的情况下，使用 `ReentrantReadWriteLock` 能够明显提升系统性能。
+
+## 3、共享锁和独占锁有什么区别？
+
+- **共享锁**：一把锁可以被多个线程同时获得。
+- **独占锁**：一把锁只能被一个线程获得。
+
+## 4、线程持有读锁还能获取写锁吗？
+
+- 在线程持有读锁的情况下，该线程不能取得写锁(因为获取写锁的时候，如果发现当前的读锁被占用，就马上获取失败，不管读锁是不是被当前线程持有)。
+- 在线程持有写锁的情况下，该线程可以继续获取读锁（获取读锁时如果发现写锁被占用，只有写锁没有被当前线程占用的情况才会获取失败）。
+
+读写锁的源码分析，推荐阅读 [聊聊 Java 的几把 JVM 级锁 - 阿里巴巴中间件](./References\聊聊 Java 的几把 JVM 级锁.mhtml) 这篇文章，写的很不错。
+
+## 5、读锁为什么不能升级为写锁？
+
+写锁可以降级为读锁，但是读锁却不能升级为写锁。这是因为读锁升级为写锁会引起线程的争夺，毕竟写锁属于是独占锁，这样的话，会影响性能。
+
+另外，还可能会有死锁问题发生。举个例子：假设两个线程的读锁都想升级写锁，则需要对方都释放自己锁，而双方都不释放，就会产生死锁。
 
