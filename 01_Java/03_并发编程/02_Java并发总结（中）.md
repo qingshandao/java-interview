@@ -3030,3 +3030,22 @@ public ReentrantReadWriteLock(boolean fair) {
 
 另外，还可能会有死锁问题发生。举个例子：假设两个线程的读锁都想升级写锁，则需要对方都释放自己锁，而双方都不释放，就会产生死锁。
 
+# 六、StampedLock
+
+![](assets/StampedLock(JDK1.8+).png)
+
+`StampedLock` 面试中问的比较少，不是很重要，简单了解即可。
+
+## 1、StampedLock 是什么？
+
+`StampedLock` 是 JDK 1.8 引入的性能更好的读写锁，**不可重入**，且不支持条件变量 `Condition`。
+
+不同于一般的 `Lock` 类，`StampedLock` 并不是直接实现 `Lock`或 `ReadWriteLock`接口，而是基于 **CLH 锁** 独立实现的（AQS 也是基于这玩意）。
+
+```java
+public class StampedLock implements java.io.Serializable {
+}
+```
+
+`StampedLock` 提供了三种模式的读写控制模式：读锁、写锁和乐观读。
+
