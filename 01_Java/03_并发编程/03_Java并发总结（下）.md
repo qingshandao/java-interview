@@ -1070,3 +1070,204 @@ public ScheduledThreadPoolExecutor(int corePoolSize) {
 下面这张图可以加深你对线程池中各个参数的相互关系的理解（图片来源：《Java 性能调优实战》）：
 
 ![](./assets/relationship-between-thread-pool-parameters.png)
+
+## 6、线程池的核心线程会被回收吗？
+
+`ThreadPoolExecutor` 默认不会回收核心线程，即使它们已经空闲了。这是为了减少创建线程的开销，因为核心线程通常是要长期保持活跃的。
+
+但是，如果线程池是被用于周期性使用的场景，且频率不高（周期之间有明显的空闲时间），可以考虑将 `allowCoreThreadTimeOut(boolean value)` 方法的参数设置为 `true`，这样就会回收空闲（时间间隔由 `keepAliveTime` 指定）的核心线程了。
+
+```java
+public void allowCoreThreadTimeOut(boolean value) {
+    // 核心线程的 keepAliveTime 必须大于 0 才能启用超时机制
+    if (value && keepAliveTime <= 0) {
+        throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
+    }
+    // 设置 allowCoreThreadTimeOut 的值
+    if (value != allowCoreThreadTimeOut) {
+        allowCoreThreadTimeOut = value;
+        // 如果启用了超时机制，清理所有空闲的线程，包括核心线程
+        if (value) {
+            interruptIdleWorkers();
+        }
+    }
+}
+```
+
+> 使用案例
+>
+> ```java
+> ThreadPoolExecutor executor = new ThreadPoolExecutor(
+>         2,                  // corePoolSize
+>         4,                  // maximumPoolSize
+>         10,                 // keepAliveTime
+>         TimeUnit.SECONDS,
+>         new LinkedBlockingQueue<>(10)
+> );
+> 
+> // 开启核心线程回收
+> executor.allowCoreThreadTimeOut(true);
+> ```
+>
+> 👉 控制**核心线程是否也参与空闲回收**
+>
+> - `false`（默认）：核心线程永远不回收
+> - `true`：核心线程在**空闲时间超过 keepAliveTime 后也会被回收**
+>
+> 执行流程：
+>
+> 1. 提交任务 → 创建2个核心线程执行
+> 2. 任务执行完 → 线程进入空闲状态
+> 3. 5秒内没有新任务
+> 4. 👉 **核心线程被销毁（线程数变为0）**
+> 5. 再来新任务 → **重新创建线程**
+
+**✅适用场景（重点）**
+
+这个开关不是随便开的，适合这些情况：
+
+- ✔ 场景1：低频任务（典型）
+	- 定时任务（每隔几分钟执行）
+	- 消息偶发处理
+	- 后台批处理任务
+
+👉 避免线程长期空闲占资源
+
+------
+
+- ✔ 场景2：资源敏感环境
+	- 容器（Docker / K8s）
+	- 内存受限应用
+
+👉 减少线程占用（线程 ≈ 内存 + 调度成本）
+
+**❌不建议开启的场景**
+
+- 高并发 / 高频任务
+
+> 比如：
+>
+> - Web 请求线程池
+> - RPC 线程池
+
+原因：
+
+👉 线程频繁销毁 + 创建 → **性能抖动**
+
+## 7、核心线程空闲时处于什么状态？
+
+核心线程空闲时，其状态分为以下两种情况：
+
+- **设置了核心线程的存活时间** ：核心线程在空闲时，会处于 `WAITING等待` 状态，等待获取任务。如果阻塞等待的时间超过了核心线程存活时间，则该线程会退出工作，将该线程从线程池的工作线程集合中移除，线程状态变为 `TERMINATED终止` 状态。
+- **没有设置核心线程的存活时间** ：核心线程在空闲时，会一直处于 `WAITING等待` 状态，等待获取任务，核心线程会一直存活在线程池中。
+
+当队列中有可用任务时，会唤醒被阻塞的线程，线程的状态会由 `WAITING` 状态变为 `RUNNABLE` 状态，之后去执行对应任务。
+
+接下来通过相关源码，了解一下线程池内部是如何做的。
+
+线程在线程池内部被抽象为了 `Worker` ，当 `Worker` 被启动之后，会不断去任务队列中获取任务。
+
+在获取任务的时候，会根据 `timed` 值来决定从任务队列（ `BlockingQueue` ）获取任务的行为。
+
+如果「设置了**核心线程**的存活时间」或者「线程池中的线程数量超过了**核心线程数**量」，则将 `timed` 标记为 `true` ，表明获取任务时需要使用 `poll()` 指定超时时间。
+
+- `timed == true` ：使用 `poll(timeout, unit)` 来获取任务。使用 `poll(timeout, unit)` 方法获取任务超时的话，则当前线程会退出执行（ `TERMINATED` ），该线程从线程池中被移除。
+- `timed == false` ：使用 `take()` 来获取任务。使用 `take()` 方法获取任务会让当前线程一直阻塞等待（`WAITING`）。
+
+源码如下：
+
+```java
+// ThreadPoolExecutor
+private Runnable getTask() {
+    boolean timedOut = false;	// 获取任务是否超时
+    for (;;) {
+        // ...
+
+        // 1、如果「设置了核心线程的存活时间」或者是「线程池中的线程数量超过了核心线程数量」，则 timed 为 true。
+        boolean timed = allowCoreThreadTimeOut || wc > corePoolSize;
+        // 2、扣减线程数量。
+        // wc > maximuimPoolSize：线程池中的线程数量超过最大线程数量。其中 wc 为线程池中的线程数量。
+        // timed && timeOut：timeOut 表示获取任务超时。
+        // 分为两种情况：
+        // （1）核心线程设置了存活时间 && 获取任务超时，则扣减线程数量；
+        // （2）线程数量超过了核心线程数量 && 获取任务超时，则扣减线程数量。
+        if ((wc > maximumPoolSize || (timed && timedOut))
+            && (wc > 1 || workQueue.isEmpty())) {
+            // 回收线程
+            if (compareAndDecrementWorkerCount(c))
+                return null;
+            continue;
+        }
+        try {
+            // 3、如果 timed 为 true，则使用 poll() 获取任务；否则，使用 take() 获取任务。
+            Runnable r = timed ?
+                workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) :
+                workQueue.take();
+            // 4、获取任务之后返回。
+            if (r != null)
+                return r;
+            timedOut = true;
+        } catch (InterruptedException retry) {
+            timedOut = false;
+        }
+    }
+}
+```
+
+> ## 关键点1：回收线程的判断逻辑
+>
+> ```java
+> 如果：
+>   当前线程数 > 最大线程数（比如你调小了线程池）
+>   或者 当前线程空闲超时
+> 
+> 并且：
+>   当前线程数 > 1 或者 任务队列已经空了
+> 
+> 那么：
+>   尝试减少一个线程
+> ```
+>
+> ## 关键点2：为什么会出现 `wc > maximumPoolSize`？
+>
+> 场景：你在运行时修改线程池参数
+>
+> ```java
+> executor.setMaximumPoolSize(5);
+> ```
+>
+> 但此时线程池里可能已经有：`wc = 8` ，那就出现：
+>
+> ```java
+> wc (8) > maximumPoolSize (5)
+> ```
+>
+>  这就是源码要处理的情况，线程池不会立刻强杀线程（不安全）， 而是让“多余的线程”**在空闲时自然退出**，所以策略是：
+>
+> > 👉 **“温柔裁员”机制**
+> >
+> > - 不打断正在执行任务的线程
+> > - 等线程空闲后再回收
+>
+> ## 关键点3：第二组条件
+>
+> ```java
+> (wc > 1 || workQueue.isEmpty())
+> ```
+>
+> 意思是：
+>
+> 👉 **避免线程池被清空得太激进**
+>
+> ------
+>
+> 两种情况允许回收：
+>
+> - ✔ 线程数 > 1
+>
+> 	👉 可以安全减少线程
+>
+> - ✔ 队列为空
+>
+> 	👉 说明真的没任务，可以放心回收
+
