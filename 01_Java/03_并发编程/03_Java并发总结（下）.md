@@ -1271,3 +1271,774 @@ private Runnable getTask() {
 >
 > 	👉 说明真的没任务，可以放心回收
 
+## 8、⭐️线程池的拒绝策略有哪些？
+
+如果当前同时运行的线程数量达到最大线程数量，并且队列也已经被放满了任务时（线程和队列都没空），`ThreadPoolExecutor` 定义一些策略:
+
+- `ThreadPoolExecutor.AbortPolicy`：抛出 `RejectedExecutionException`来拒绝新任务的处理。
+
+  > 📌 场景案例：订单系统
+  >
+  > ```java
+  > executor.execute(() -> createOrder());
+  > ```
+  >
+  > 当系统已经满载，直接报错：`RejectedExecutionException`
+  >
+  > 💥 影响
+  >
+  > - 调用方必须处理异常
+  > - 否则直接导致接口报错（HTTP 500）
+  >
+  > ✅ 适用场景
+  >
+  > 👉 **不能丢任务，也不能降级**
+  >
+  > 例如：
+  >
+  > - 支付
+  > - 核心交易
+  > - 数据一致性强依赖
+
+- `ThreadPoolExecutor.CallerRunsPolicy`：调用执行者自己的线程运行任务，也就是直接在调用`execute`方法的线程中运行(`run`)被拒绝的任务，如果执行程序已关闭，则会丢弃该任务。因此这种策略会降低对于新任务提交速度，影响程序的整体性能。如果你的应用程序可以承受此延迟并且你要求任何一个任务请求都要被执行的话，你可以选择这个策略。
+
+  > 📌 场景案例：日志系统
+  >
+  > ```java
+  > executor.execute(() -> writeLog());
+  > ```
+  >
+  > 线程池满了之后，当前线程（比如 main / Tomcat 线程）执行：`main线程开始写日志...`
+  >
+  > 💡 核心效果：**反压（Back Pressure）**
+  >
+  > 因为：👉 提交任务的线程被“拖慢了”
+  >
+  > 🔥 实际效果
+  >
+  > | 原来       | 现在       |
+  > | ---------- | ---------- |
+  > | 线程池处理 | 调用方处理 |
+  > | 快速提交   | 被阻塞变慢 |
+  >
+  > ✅ 适用场景
+  >
+  > - 不允许丢任务
+  > - 可以接受变慢
+  >
+  > 例如：
+  >
+  > - 日志系统
+  > - 异步落库（但不能丢）
+  >
+  > ❗ 注意坑
+  >
+  > 如果你在 Web 服务中用：
+  >
+  > 👉 会拖慢请求线程（比如 Tomcat）
+
+- `ThreadPoolExecutor.DiscardPolicy`：不处理新任务，直接丢弃掉。
+
+  > 📌 场景案例：埋点统计
+  >
+  > ```java
+  > executor.execute(() -> sendMetric());
+  > ```
+  >
+  > 线程池满：👉 任务直接消失（无日志、无异常）
+  >
+  > 💥 风险
+  >
+  > 👉 **数据直接丢失且你不知道**
+  >
+  > ✅ 适用场景
+  >
+  > - 允许丢数据
+  > - 非核心业务
+  >
+  > 例如：
+  >
+  > - 用户行为埋点
+  > - 推荐系统曝光统计
+
+- `ThreadPoolExecutor.DiscardOldestPolicy`：此策略将丢弃最早的未处理的任务请求。
+
+  > 📌 场景案例：实时数据处理
+  >
+  > 队列中任务：
+  >
+  > ```
+  > [任务A, 任务B]
+  > ```
+  >
+  > 新任务 C 来了（线程池满）：
+  >
+  > 👉 执行：
+  >
+  > ```java
+  > 丢弃 A
+  > 队列变成 [任务B]
+  > 加入 C → [任务B, 任务C]
+  > ```
+  >
+  > 💡 本质
+  >
+  > 👉 **保新不保旧**
+  >
+  > ✅ 适用场景
+  >
+  > - 更关心“最新数据”
+  >
+  > 例如：
+  >
+  > - 实时监控
+  > - UI刷新任务
+  > - 股票行情推送
+  >
+  > ❗ 注意坑
+  >
+  > 👉 被丢弃的任务**完全不会执行**
+
+### ⚖️ 四种策略对比总结
+
+| 策略                | 是否丢任务 | 是否报错 | 特点     |
+| ------------------- | ---------- | -------- | -------- |
+| AbortPolicy         | ❌          | ✅        | 强制失败 |
+| CallerRunsPolicy    | ❌          | ❌        | 降速执行 |
+| DiscardPolicy       | ✅          | ❌        | 静默丢弃 |
+| DiscardOldestPolicy | ✅（丢旧）  | ❌        | 保新任务 |
+
+### 🧠 真实生产怎么选？
+
+👉 一般建议：
+
+| 场景      | 推荐策略            |
+| --------- | ------------------- |
+| 核心业务  | AbortPolicy         |
+| 日志/异步 | CallerRunsPolicy    |
+| 埋点/统计 | DiscardPolicy       |
+| 实时系统  | DiscardOldestPolicy |
+
+举个例子：Spring 通过 `ThreadPoolTaskExecutor` 或者我们直接通过 `ThreadPoolExecutor` 的构造函数创建线程池的时候，当我们不指定 `RejectedExecutionHandler` 拒绝策略来配置线程池的时候，默认使用的是 `AbortPolicy`。在这种拒绝策略下，如果队列满了，`ThreadPoolExecutor` 将抛出 `RejectedExecutionException` 异常来拒绝新来的任务 ，这代表你将丢失对这个任务的处理。如果不想丢弃任务的话，可以使用`CallerRunsPolicy`。`CallerRunsPolicy` 和其他的几个策略不同，它既不会抛弃任务，也不会抛出异常，而是将任务回退给调用者，使用调用者的线程来执行任务。
+
+```java
+public static class CallerRunsPolicy implements RejectedExecutionHandler {
+
+        public CallerRunsPolicy() { }
+
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+            if (!e.isShutdown()) {
+                // 直接主线程执行，而不是线程池中的线程执行
+                r.run();
+            }
+        }
+    }
+```
+
+### 🧪测试案例
+
+```java
+import java.util.concurrent.*;
+
+public class ThreadPoolRejectDemo {
+
+    public static void main(String[] args) throws InterruptedException {
+
+        testPolicy("AbortPolicy", new ThreadPoolExecutor.AbortPolicy());
+        testPolicy("CallerRunsPolicy", new ThreadPoolExecutor.CallerRunsPolicy());
+        testPolicy("DiscardPolicy", new ThreadPoolExecutor.DiscardPolicy());
+        testPolicy("DiscardOldestPolicy", new ThreadPoolExecutor.DiscardOldestPolicy());
+    }
+
+    private static void testPolicy(String name, RejectedExecutionHandler handler) throws InterruptedException {
+
+        System.out.println("\n==============================");
+        System.out.println("测试策略: " + name);
+        System.out.println("==============================");
+
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                2,                      // core
+                2,                      // max（故意设置一样，方便触发）
+                10,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(2), // 队列容量2
+                Executors.defaultThreadFactory(),
+                handler
+        );
+
+        // 提交 6 个任务（一定会触发拒绝策略）
+        for (int i = 1; i <= 6; i++) {
+            final int taskId = i;
+
+            try {
+                executor.execute(() -> {
+                    String threadName = Thread.currentThread().getName();
+                    System.out.println("任务 " + taskId + " 执行线程: " + threadName);
+                    try {
+                        Thread.sleep(2000); // 模拟任务执行耗时
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                });
+                System.out.println("提交任务 " + taskId + " 成功");
+            } catch (Exception e) {
+                System.out.println("任务 " + taskId + " 被拒绝: " + e);
+            }
+        }
+
+        executor.shutdown();
+        executor.awaitTermination(10, TimeUnit.SECONDS);
+    }
+}
+```
+
+> ### 🔍一、典型输出（重点解读）
+>
+> #### 1️⃣ AbortPolicy（默认）
+>
+> ```java
+> 提交任务 1 成功
+> 提交任务 2 成功
+> 提交任务 3 成功
+> 提交任务 4 成功
+> 任务 5 被拒绝: RejectedExecutionException
+> 任务 6 被拒绝: RejectedExecutionException
+> ```
+>
+> 👉 特点：
+>
+> - 超出的任务直接抛异常
+> - **强制失败**
+>
+> #### 2️⃣ CallerRunsPolicy
+>
+> ```java
+> 提交任务 1 成功
+> 提交任务 2 成功
+> 提交任务 3 成功
+> 提交任务 4 成功
+> 任务 5 执行线程: main
+> 任务 6 执行线程: main
+> ```
+>
+> 👉 特点：
+>
+> - 被拒绝的任务由 **主线程执行**
+> - 明显看到：`main`
+>
+> #### 3️⃣ DiscardPolicy
+>
+> ```java
+> 提交任务 1 成功
+> 提交任务 2 成功
+> 提交任务 3 成功
+> 提交任务 4 成功
+> 提交任务 5 成功
+> 提交任务 6 成功
+> ```
+>
+> 但会发现：👉 **任务5、6根本没执行（悄悄丢了）**
+>
+> #### 4️⃣ DiscardOldestPolicy
+>
+> ```java
+> 提交任务 1 成功
+> 提交任务 2 成功
+> 提交任务 3 成功
+> 提交任务 4 成功
+> 提交任务 5 成功
+> 提交任务 6 成功
+> ```
+>
+> 但执行顺序可能变成：
+>
+> ```java
+> 任务 3 执行
+> 任务 4 执行
+> 任务 5 执行
+> 任务 6 执行
+> ```
+>
+> 👉 说明：任务1、2 被“踢掉了”
+>
+> ### 🧠 二、为什么一定会触发拒绝？
+>
+> 配置是关键👇
+>
+> ```java
+> core = 2
+> max = 2
+> queue = 2
+> 总容量 = 4
+> ```
+>
+> 但提交：
+>
+> ```java
+> 6 个任务
+> ```
+>
+> 👉 多出来的 2 个任务 → 必触发拒绝策略
+
+### 🚀自定义拒绝策略（生产常用）
+
+很多情况不会直接用默认策略，而是**自定义**：
+
+```
+class MyRejectHandler implements RejectedExecutionHandler {
+
+    @Override
+    public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+        System.out.println("❗任务被拒绝，记录日志 + 告警");
+
+        // 可以做：
+        // 1. 记录日志
+        // 2. 写入数据库
+        // 3. 发送报警（钉钉/邮件）
+        // 4. 降级处理
+    }
+}
+```
+
+使用：
+
+```
+new ThreadPoolExecutor(
+        2, 2, 10, TimeUnit.SECONDS,
+        new ArrayBlockingQueue<>(2),
+        new MyRejectHandler()
+);
+```
+
+### 🧠 一句话总结
+
+👉 **拒绝策略不是“异常情况”，而是线程池“过载保护机制”的核心设计。**
+
+## 9、如果不允许丢弃任务，应该选择哪个拒绝策略？
+
+根据上面对线程池拒绝策略的介绍，相信大家很容易能够得出答案是：`CallerRunsPolicy` 。
+
+这里我们再来结合`CallerRunsPolicy` 的源码来看看：
+
+```java
+public static class CallerRunsPolicy implements RejectedExecutionHandler {
+
+        public CallerRunsPolicy() { }
+
+
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+            //只要当前程序没有关闭，就用执行execute方法的线程执行该任务
+            if (!e.isShutdown()) {
+
+                r.run();
+            }
+        }
+    }
+```
+
+从源码可以看出，只要当前程序不关闭，就会使用执行`execute`方法的线程执行该任务。
+
+> ### 🧠 一、两个参数分别是什么？
+>
+> #### 1️⃣ Runnable r —— 被拒绝的任务
+>
+> 👉 就是你调用 `execute()` 提交的那个任务
+>
+> 举个例子：
+>
+> ```java
+> executor.execute(() -> {
+>  System.out.println("执行任务");
+> });
+> ```
+>
+> 当线程池满了，这个 lambda：
+>
+> ```java
+> () -> {
+>  System.out.println("执行任务");
+> }
+> ```
+>
+> 👉 就会被封装成一个 `Runnable`，传进：
+>
+> ```java
+> rejectedExecution(Runnable r, ThreadPoolExecutor e)
+> ```
+>
+> 也就是说：
+>
+> ```java
+> r = 这个没被线程池接收的任务
+> ```
+>
+> #### 2️⃣ ThreadPoolExecutor e —— 当前线程池实例
+>
+> 👉 就是“拒绝你的那个线程池”
+>
+> 可以通过它获取很多信息：
+>
+> ```java
+> e.getPoolSize();        // 当前线程数
+> e.getQueue().size();   // 队列长度
+> e.isShutdown();        // 是否关闭
+> ```
+>
+> ### 🧠 二、为什么需要这两个参数？
+>
+> 👉 因为拒绝策略本质是一个“兜底处理逻辑”
+>
+> 你可以根据：
+>
+> - **任务本身（r）**
+> - **线程池状态（e）**
+>
+> 做不同处理
+>
+> ### 🔥 三、结合源码这段逻辑理解
+>
+> ```java
+> if (!e.isShutdown()) {
+>     r.run();
+> }
+> ```
+>
+> 意思是：
+>
+> 👉 只要线程池还没关闭
+>
+> 👉 就用“当前调用线程”执行这个任务
+>
+> ### 🧵 四、关键点：谁在执行 r.run()？
+>
+> 👉 **调用 `execute()` 的那个线程**
+>
+> ### 举个非常关键的例子：
+>
+> ```
+> public static void main(String[] args) {
+>     executor.execute(() -> {
+>         System.out.println(Thread.currentThread().getName());
+>     });
+> }
+> ```
+>
+> 如果触发 `CallerRunsPolicy`：
+>
+> 👉 输出很可能是：
+>
+> ```
+> main
+> ```
+>
+> ------
+>
+> 如果是在 Web 项目里：
+>
+> 👉 可能是：
+>
+> ```java
+> http-nio-8080-exec-1
+> ```
+>
+> ### ⚠️ 五、为什么要传入线程池对象 e？
+>
+> 这是为了支持**更高级的自定义策略**
+>
+> ------
+>
+> #### ✅ 示例：根据线程池状态做不同处理
+>
+> ```
+> class SmartRejectHandler implements RejectedExecutionHandler {
+> 
+>     @Override
+>     public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+> 
+>         if (e.getQueue().size() > 100) {
+>             System.out.println("队列爆了，丢任务");
+>             return;
+>         }
+> 
+>         System.out.println("降级执行");
+>         r.run();
+>     }
+> }
+> ```
+>
+> ------
+>
+> #### ✅ 示例：记录监控信息
+>
+> ```java
+> @Override
+> public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+>     System.out.println("线程池状态：");
+>     System.out.println("当前线程数：" + e.getPoolSize());
+>     System.out.println("队列大小：" + e.getQueue().size());
+> }
+> ```
+>
+> ### 🎯 六、一句话总结
+>
+> 👉
+>
+> - `r`：被拒绝的任务（你提交但没被执行的）
+> - `e`：当前线程池（用来判断系统状态）
+>
+> ### 🚀 七、面试加分回答
+>
+> 如果面试官问你这个问题，你可以这样答：
+>
+> > rejectedExecution 方法有两个参数：Runnable r 表示被拒绝的任务，ThreadPoolExecutor e 表示当前线程池实例。通过这两个参数可以在拒绝策略中根据任务内容和线程池当前状态做不同处理，比如降级执行、记录日志或者丢弃任务。
+
+## 10、CallerRunsPolicy 拒绝策略有什么风险？如何解决？
+
+我们上面也提到了：如果想要保证任何一个任务请求都要被执行的话，那选择 `CallerRunsPolicy` 拒绝策略更合适一些。
+
+不过，如果走到`CallerRunsPolicy`的任务是个非常耗时的任务，且处理提交任务的线程是主线程，可能会导致主线程阻塞，影响程序的正常运行。
+
+这里简单举一个例子，该线程池限定了最大线程数为 2，阻塞队列大小为 1(这意味着第 4 个任务就会走到拒绝策略)，`ThreadUtil`为 Hutool 提供的工具类：
+
+```java
+public class ThreadPoolTest {
+
+    private static final Logger log = LoggerFactory.getLogger(ThreadPoolTest.class);
+
+    public static void main(String[] args) {
+        // 创建一个线程池，核心线程数为1，最大线程数为2
+        // 当线程数大于核心线程数时，多余的空闲线程存活的最长时间为60秒，
+        // 任务队列为容量为1的ArrayBlockingQueue，饱和策略为CallerRunsPolicy。
+        ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(1,
+                2,
+                60,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(1),
+                new ThreadPoolExecutor.CallerRunsPolicy());
+
+        // 提交第一个任务，由核心线程执行
+        threadPoolExecutor.execute(() -> {
+            log.info("核心线程执行第一个任务");
+            ThreadUtil.sleep(1, TimeUnit.MINUTES);
+        });
+
+        // 提交第二个任务，由于核心线程被占用，任务将进入队列等待
+        threadPoolExecutor.execute(() -> {
+            log.info("非核心线程处理入队的第二个任务");
+            ThreadUtil.sleep(1, TimeUnit.MINUTES);
+        });
+
+        // 提交第三个任务，由于核心线程被占用且队列已满，创建非核心线程处理
+        threadPoolExecutor.execute(() -> {
+            log.info("非核心线程处理第三个任务");
+            ThreadUtil.sleep(1, TimeUnit.MINUTES);
+        });
+
+        // 提交第四个任务，由于核心线程和非核心线程都被占用，队列也满了，根据CallerRunsPolicy策略，任务将由提交任务的线程（即主线程）来执行
+        threadPoolExecutor.execute(() -> {
+            log.info("主线程处理第四个任务");
+            ThreadUtil.sleep(2, TimeUnit.MINUTES);
+        });
+
+        // 提交第五个任务，主线程被第四个任务卡住，该任务必须等到主线程执行完才能提交
+        threadPoolExecutor.execute(() -> {
+            log.info("核心线程执行第五个任务");
+        });
+
+        // 关闭线程池
+        threadPoolExecutor.shutdown();
+    }
+}
+```
+
+输出：
+
+```bash
+18:19:48.203 INFO  [pool-1-thread-1] c.j.concurrent.ThreadPoolTest - 核心线程执行第一个任务
+18:19:48.203 INFO  [pool-1-thread-2] c.j.concurrent.ThreadPoolTest - 非核心线程处理第三个任务
+18:19:48.203 INFO  [main] c.j.concurrent.ThreadPoolTest - 主线程处理第四个任务
+18:20:48.212 INFO  [pool-1-thread-2] c.j.concurrent.ThreadPoolTest - 非核心线程处理入队的第二个任务
+18:21:48.219 INFO  [pool-1-thread-2] c.j.concurrent.ThreadPoolTest - 核心线程执行第五个任务
+```
+
+从输出结果可以看出，因为`CallerRunsPolicy`这个拒绝策略，导致耗时的任务用了主线程执行，导致线程池阻塞，进而导致后续任务无法及时执行，严重的情况下很可能导致 OOM。
+
+我们从问题的本质入手，调用者采用`CallerRunsPolicy`是希望所有的任务都能够被执行，暂时无法处理的任务又被保存在阻塞队列`BlockingQueue`中。这样的话，在内存允许的情况下，我们可以增加阻塞队列`BlockingQueue`的大小并调整堆内存以容纳更多的任务，确保任务能够被准确执行。
+
+为了充分利用 CPU，我们还可以调整线程池的`maximumPoolSize` （最大线程数）参数，这样可以提高任务处理速度，避免累计在 `BlockingQueue`的任务过多导致内存用完。
+
+![](./assets/threadpool-reject-2-threadpool-reject-01.png)
+
+如果服务器资源已经达到可利用的极限，这就意味我们要在设计策略上改变线程池的调度了，我们都知道，导致主线程卡死的本质就是因为我们不希望任何一个任务被丢弃。换个思路，有没有办法既能保证任务不被丢弃，且在服务器有余力时及时处理呢？
+
+这里提供的一种**任务持久化**的思路，这里所谓的任务持久化，包括但不限于:
+
+1. 设计一张任务表将任务存储到 MySQL 数据库中。
+2. Redis 缓存任务。
+3. 将任务提交到消息队列中。
+
+这里以方案一为例，简单介绍一下实现逻辑：
+
+1. 实现`RejectedExecutionHandler`接口自定义拒绝策略，自定义拒绝策略负责将线程池暂时无法处理（此时阻塞队列已满）的任务入库（保存到 MySQL 中）。注意：线程池暂时无法处理的任务会先被放在阻塞队列中，阻塞队列满了才会触发拒绝策略。
+2. 继承`BlockingQueue`实现一个混合式阻塞队列，该队列包含 JDK 自带的`ArrayBlockingQueue`。另外，该混合式阻塞队列需要修改取任务处理的逻辑，也就是重写`take()`方法，取任务时优先从数据库中读取最早的任务，数据库中无任务后再从 `ArrayBlockingQueue`中去取任务。
+
+![](./assets/threadpool-reject-2-threadpool-reject-02.png)
+
+整个实现逻辑还是比较简单的，核心在于自定义拒绝策略和阻塞队列。如此一来，一旦我们的线程池中线程达到满载时，我们就可以通过拒绝策略将最新任务持久化到 MySQL 数据库中，等到线程池有了有余力处理所有任务时，让其优先处理数据库中的任务以避免"饥饿"问题。
+
+当然，对于这个问题，我们也可以参考其他主流框架的做法。
+
+以 Netty 为例，它的拒绝策略则是直接创建一个线程池以外的线程处理这些任务，为了保证任务的实时处理，这种做法可能需要良好的硬件设备，且临时创建的线程无法做到准确的监控：
+
+```java
+private static final class NewThreadRunsPolicy implements RejectedExecutionHandler {
+    NewThreadRunsPolicy() {
+        super();
+    }
+    public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+        try {
+            //创建一个临时线程处理任务
+            final Thread t = new Thread(r, "Temporary task executor");
+            t.start();
+        } catch (Throwable e) {
+            throw new RejectedExecutionException(
+                    "Failed to start a new thread", e);
+        }
+    }
+}
+```
+
+ActiveMQ 则是尝试在指定的时效内尽可能的争取将任务入队，以保证最大交付：
+
+```java
+new RejectedExecutionHandler() {
+                @Override
+                public void rejectedExecution(final Runnable r, final ThreadPoolExecutor executor) {
+                    try {
+                        //限时阻塞等待，实现尽可能交付
+                        executor.getQueue().offer(r, 60, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        throw new RejectedExecutionException("Interrupted waiting for BrokerService.worker");
+                    }
+                    throw new RejectedExecutionException("Timed Out while attempting to enqueue Task.");
+                }
+            });
+```
+
+## 11、线程池常用的阻塞队列有哪些？
+
+新任务来的时候会先判断当前运行的线程数量是否达到核心线程数，如果达到的话，新任务就会被存放在队列中。
+
+不同的线程池会选用不同的阻塞队列，我们可以结合内置线程池来分析。
+
+- 容量为 `Integer.MAX_VALUE` 的 `LinkedBlockingQueue`（**无界阻塞**队列）：`FixedThreadPool` 和 `SingleThreadExecutor` 。`FixedThreadPool`最多只能创建核心线程数的线程（核心线程数和最大线程数相等，且由创建者指定数量），`SingleThreadExecutor`只能创建一个线程（核心线程数和最大线程数都是 1），二者的任务队列永远不会被放满。
+
+- `SynchronousQueue`（同步队列）：`CachedThreadPool` 。`SynchronousQueue` 没有容量，**不存储元素**，目的是保证对于提交的任务，如果有空闲线程，则使用空闲线程来处理；否则新建一个线程来处理任务。也就是说，`CachedThreadPool` 的最大线程数是 `Integer.MAX_VALUE` ，可以理解为线程数是可以无限扩展的，可能会创建大量线程，从而导致 OOM。
+
+- `DelayedWorkQueue`（**延迟队列**）：`ScheduledThreadPool` 和 `SingleThreadScheduledExecutor` 。`DelayedWorkQueue` 的内部元素并不是按照放入的时间排序，而是会按照延迟的时间长短对任务进行排序，内部采用的是“堆”的数据结构，可以保证每次出队的任务都是当前队列中执行时间最靠前的。`DelayedWorkQueue` 是一个**无界队列**，其底层虽然是数组，但当数组容量不足时，它会自动进行扩容，因此队列永远不会被填满。当任务不断提交时，它们会全部被添加到队列中。这意味着线程池的线程数量永远不会超过其核心线程数，最大线程数参数对于使用该队列的线程池来说是无效的。
+
+  > 理解：线程池创建线程的核心逻辑（简化）
+  >
+  > ```
+  > 1. 当前线程数 < corePoolSize → 创建核心线程
+  > 2. 否则 → 尝试把任务放入队列
+  > 3. 如果队列满了 → 创建非核心线程（直到 maximumPoolSize）
+  > 4. 如果还不行 → 触发拒绝策略
+  > ```
+  >
+  > 因为 `DelayedWorkQueue` 是一个**无界队列**，因此 `offer()` 永远成功，不会创建非核心线程
+
+- `ArrayBlockingQueue`（有界阻塞队列）：底层由数组实现，容量一旦创建，就不能修改。
+
+
+
+## 12、⭐️线程池处理任务的流程了解吗？
+
+![](./assets/thread-pool-principle.png)
+
+1. 如果当前运行的线程数小于核心线程数，那么就会新建一个线程来执行任务。
+2. 如果当前运行的线程数等于或大于核心线程数，但是小于最大线程数，那么就把该任务放入到任务队列里等待执行。
+3. 如果向任务队列投放任务失败（任务队列已经满了），但是当前运行的线程数是小于最大线程数的，就新建一个非核心线程来执行任务。
+4. 如果当前运行的线程数已经等同于最大线程数了，新建线程将会使当前运行的线程超出最大线程数，那么当前任务会被拒绝，拒绝策略会调用`RejectedExecutionHandler.rejectedExecution()`方法。
+
+再提一个有意思的小问题：**线程池在提交任务前，可以提前创建线程吗？**
+
+答案是可以的！`ThreadPoolExecutor` 提供了两个方法帮助我们在提交任务之前，完成核心线程的创建，从而实现**线程池预热**的效果：
+
+- `prestartCoreThread()`：启动一个线程，等待任务，如果已达到核心线程数，这个方法返回 false，否则返回 true；
+- `prestartAllCoreThreads()`：启动所有的核心线程，并返回启动成功的核心线程数。
+
+> ### 🧪 示例一：对比“是否预热”的差异（`prestartAllCoreThreads()` 为例，启动所有核心线程）
+>
+> ```java
+> import java.util.concurrent.*;
+> 
+> public class PrestartDemo {
+> 
+>     public static void main(String[] args) throws Exception {
+> 
+>         ThreadPoolExecutor executor = new ThreadPoolExecutor(
+>                 3,                      // corePoolSize
+>                 3,                      // maximumPoolSize
+>                 60,
+>                 TimeUnit.SECONDS,
+>                 new LinkedBlockingQueue<>()
+>         );
+> 
+>         // 👉 1. 不预热时
+>         System.out.println("【不预热】当前线程数：" + executor.getPoolSize());
+> 
+>         // 提交第一个任务
+>         executor.execute(() -> {
+>             System.out.println("任务1执行线程：" + Thread.currentThread().getName());
+>         });
+> 
+>         Thread.sleep(500); // 等一下让线程创建完成
+>         System.out.println("提交任务后线程数：" + executor.getPoolSize());
+> 
+> 
+>         // 👉 2. 预热所有核心线程
+>         ThreadPoolExecutor executor2 = new ThreadPoolExecutor(
+>                 3,
+>                 3,
+>                 60,
+>                 TimeUnit.SECONDS,
+>                 new LinkedBlockingQueue<>()
+>         );
+> 
+>         int started = executor2.prestartAllCoreThreads();
+>         System.out.println("\n【预热后】已启动核心线程数：" + started);
+>         System.out.println("当前线程数：" + executor2.getPoolSize());
+> 
+>         executor2.execute(() -> {
+>             System.out.println("任务2执行线程：" + Thread.currentThread().getName());
+>         });
+> 
+>         executor.shutdown();
+>         executor2.shutdown();
+>     }
+> }
+> ```
+>
+> 🔍 输出解读
+>
+> 可能类似这样：
+>
+> ```java
+> 【不预热】当前线程数：0
+> 任务1执行线程：pool-1-thread-1
+> 提交任务后线程数：1
+> 
+> 【预热后】已启动核心线程数：3
+> 当前线程数：3
+> 任务2执行线程：pool-2-thread-1
+> ```
+>
+> 🧠 关键对比
+>
+> | 场景   | 线程创建时机       |
+> | ------ | ------------------ |
+> | 不预热 | 提交任务时才创建   |
+> | 预热   | 提交任务前就创建好 |
+>
+> 
