@@ -2590,3 +2590,176 @@ public final class NamingThreadFactory implements ThreadFactory {
 - **[Hippo4j](https://github.com/opengoofy/hippo4j)**：异步线程池框架，支持线程池动态变更&监控&报警，无需修改代码轻松引入。支持多种使用模式，轻松引入，致力于提高系统运行保障能力。
 
 - **[Dynamic TP](https://github.com/dromara/dynamic-tp)**：轻量级动态线程池，内置监控告警功能，集成三方中间件线程池管理，基于主流配置中心（已支持 Nacos、Apollo，Zookeeper、Consul、Etcd，可通过 SPI 自定义实现）。
+
+## 17、⭐️如何设计一个能够根据任务的优先级来执行的线程池？
+
+这是一个常见的面试问题，本质其实还是在考察求职者对于线程池以及阻塞队列的掌握。
+
+我们上面也提到了，不同的线程池会选用不同的阻塞队列作为任务队列，比如`FixedThreadPool` 使用的是`LinkedBlockingQueue`（有界队列），默认构造器初始的队列长度为 `Integer.MAX_VALUE` ，由于队列永远不会被放满，因此`FixedThreadPool`最多只能创建核心线程数的线程。
+
+假如我们需要实现一个优先级任务线程池的话，那可以考虑使用 `PriorityBlockingQueue` （优先级阻塞队列）作为任务队列（`ThreadPoolExecutor` 的构造函数有一个 `workQueue` 参数可以传入任务队列）。
+
+![](./assets/common-parameters-of-threadpool-workqueue.jpg)
+
+`PriorityBlockingQueue` 是一个支持优先级的无界阻塞队列，可以看作是线程安全的 `PriorityQueue`，两者底层都是使用小顶堆形式的二叉堆，即值最小的元素优先出队。不过，`PriorityQueue` 不支持阻塞操作。
+
+要想让 `PriorityBlockingQueue` 实现对任务的排序，传入其中的任务必须是具备排序能力的，方式有两种：
+
+1. 提交到线程池的任务实现 `Comparable` 接口，并重写 `compareTo` 方法来指定任务之间的优先级比较规则。
+
+   > ```java
+   > import java.util.concurrent.*;
+   > 
+   > public class PriorityDemo1 {
+   > 
+   >     public static void main(String[] args) {
+   > 
+   >         ThreadPoolExecutor executor = new ThreadPoolExecutor(
+   >                 1, 1,
+   >                 60, TimeUnit.SECONDS,
+   >                 new PriorityBlockingQueue<>()
+   >         );
+   > 
+   >         executor.execute(new PriorityTask("任务A", 3));
+   >         executor.execute(new PriorityTask("任务B", 1));
+   >         executor.execute(new PriorityTask("任务C", 2));
+   > 
+   >         executor.shutdown();
+   >     }
+   > }
+   > 
+   > // 👇 实现 Comparable
+   > class PriorityTask implements Runnable, Comparable<PriorityTask> {
+   > 
+   >     private String name;
+   >     private int priority; // 数值越小优先级越高
+   > 
+   >     public PriorityTask(String name, int priority) {
+   >         this.name = name;
+   >         this.priority = priority;
+   >     }
+   > 
+   >     @Override
+   >     public void run() {
+   >         System.out.println("执行：" + name + "，优先级：" + priority +
+   >                 "，线程：" + Thread.currentThread().getName());
+   >     }
+   > 
+   >     @Override
+   >     public int compareTo(PriorityTask o) {
+   >         // 小的优先级先执行
+   >         return Integer.compare(this.priority, o.priority);
+   >     }
+   > }
+   > ```
+   >
+   > 🔍 输出（可能是）
+   >
+   > ```java
+   > 执行：任务B，优先级：1
+   > 执行：任务C，优先级：2
+   > 执行：任务A，优先级：3
+   > ```
+   >
+   > 🧠 说明
+   >
+   > - `PriorityBlockingQueue` 是**小顶堆**
+   > - `compareTo` 决定排序规则
+   > - 优先级越小 → 越先执行
+   >
+   > ⚠️ 坑点（非常重要）
+   >
+   > 👉 如果你这样写：
+   >
+   > ```
+   > executor.submit(new PriorityTask(...));
+   > ```
+   >
+   > 👉 ❌ 可能直接报错：
+   >
+   > ```
+   > ClassCastException
+   > ```
+   >
+   > 原因：
+   >
+   > ```java
+   > submit → 包装成 FutureTask（不是 Comparable）
+   > ```
+   >
+   > 
+
+2. 创建 `PriorityBlockingQueue` 时传入一个 `Comparator` 对象来指定任务之间的排序规则**（推荐）**。
+
+   > ```java
+   > import java.util.concurrent.*;
+   > 
+   > public class PriorityDemo2 {
+   > 
+   >     public static void main(String[] args) {
+   > 
+   >         // 👇 自定义比较器
+   >         PriorityBlockingQueue<Runnable> queue =
+   >                 new PriorityBlockingQueue<>(11, (r1, r2) -> {
+   >                     PriorityTask t1 = (PriorityTask) r1;
+   >                     PriorityTask t2 = (PriorityTask) r2;
+   >                     return Integer.compare(t1.getPriority(), t2.getPriority());
+   >                 });
+   > 
+   >         ThreadPoolExecutor executor = new ThreadPoolExecutor(
+   >                 1, 1,
+   >                 60, TimeUnit.SECONDS,
+   >                 queue
+   >         );
+   > 
+   >         executor.execute(new PriorityTask("任务A", 3));
+   >         executor.execute(new PriorityTask("任务B", 1));
+   >         executor.execute(new PriorityTask("任务C", 2));
+   > 
+   >         executor.shutdown();
+   >     }
+   > }
+   > 
+   > class PriorityTask implements Runnable {
+   > 
+   >     private String name;
+   >     private int priority;
+   > 
+   >     public PriorityTask(String name, int priority) {
+   >         this.name = name;
+   >         this.priority = priority;
+   >     }
+   > 
+   >     public int getPriority() {
+   >         return priority;
+   >     }
+   > 
+   >     @Override
+   >     public void run() {
+   >         System.out.println("执行：" + name + "，优先级：" + priority);
+   >     }
+   > }
+   > ```
+   >
+   > 🧠 优势
+   >
+   > - 不需要修改任务类
+   >
+   > - 可以随时切换排序策略
+   >
+   > - 更符合“开闭原则”
+   >
+   > 
+
+不过，这存在一些风险和问题，比如：
+
+- `PriorityBlockingQueue` 是无界的，可能堆积大量的请求，从而导致 OOM。
+- 可能会导致饥饿问题，即低优先级的任务长时间得不到执行。
+- 由于需要对队列中的元素进行排序操作以及保证线程安全（并发控制采用的是可重入锁 `ReentrantLock`），因此会降低性能。
+
+对于 OOM 这个问题的解决比较简单粗暴，就是继承`PriorityBlockingQueue` 并重写一下 `offer` 方法(入队)的逻辑，当插入的元素数量超过指定值就返回 false 。
+
+饥饿问题这个可以通过优化设计来解决（比较麻烦），比如等待时间过长的任务会被移除并重新添加到队列中，但是优先级会被提升。
+
+对于性能方面的影响，是没办法避免的，毕竟需要对任务进行排序操作。并且，对于大部分业务场景来说，这点性能影响是可以接受的。
+
