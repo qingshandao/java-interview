@@ -2567,3 +2567,26 @@ public final class NamingThreadFactory implements ThreadFactory {
 - **`maximumPoolSize` :** 当队列中存放的任务达到队列容量的时候，当前可以同时运行的线程数量变为最大线程数。
 - **`workQueue`:** 当新任务来的时候会先判断当前运行的线程数量是否达到核心线程数，如果达到的话，新任务就会被存放在队列中。
 
+**为什么是这三个参数？**
+
+在[Java 线程池详解](./★重要知识点\04_Java线程池详解.md) 这篇文章中就说过这三个参数是 `ThreadPoolExecutor` 最重要的参数，它们基本决定了线程池对于任务的处理策略。
+
+**如何支持参数动态配置？** 且看 `ThreadPoolExecutor` 提供的下面这些方法。
+
+![](./assets/threadpoolexecutor-methods.png)
+
+格外需要注意的是`corePoolSize`， 程序运行期间的时候，我们调用 `setCorePoolSize()`这个方法的话，线程池会首先判断当前工作线程数是否大于`corePoolSize`，如果大于的话就会回收工作线程。
+
+另外，你也看到了上面并没有动态指定队列长度的方法，美团的方式是自定义了一个叫做 `ResizableCapacityLinkedBlockIngQueue` 的队列（主要就是把`LinkedBlockingQueue`的 capacity 字段的 final 关键字修饰给去掉了，让它变为可变的）。
+
+最终实现的可动态修改线程池参数效果如下。👏👏👏
+
+![](./assets/meituan-dynamically-configuring-thread-pool-parameters.png)
+
+还没看够？我在[《后端面试高频系统设计&场景题》](../../补充\JavaGuide星球\02_后端面试高频系统&场景题\02_经典系统设计案例\04_如何设计一个动态线程池？.mhtml)中详细介绍了如何设计一个动态线程池，这也是面试中常问的一道系统设计题。
+
+如果我们的项目也想要实现这种效果的话，可以借助现成的开源项目：
+
+- **[Hippo4j](https://github.com/opengoofy/hippo4j)**：异步线程池框架，支持线程池动态变更&监控&报警，无需修改代码轻松引入。支持多种使用模式，轻松引入，致力于提高系统运行保障能力。
+
+- **[Dynamic TP](https://github.com/dromara/dynamic-tp)**：轻量级动态线程池，内置监控告警功能，集成三方中间件线程池管理，基于主流配置中心（已支持 Nacos、Apollo，Zookeeper、Consul、Etcd，可通过 SPI 自定义实现）。
