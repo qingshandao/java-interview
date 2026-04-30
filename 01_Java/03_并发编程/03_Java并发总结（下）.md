@@ -1965,8 +1965,65 @@ new RejectedExecutionHandler() {
 
 答案是可以的！`ThreadPoolExecutor` 提供了两个方法帮助我们在提交任务之前，完成核心线程的创建，从而实现**线程池预热**的效果：
 
-- `prestartCoreThread()`：启动一个线程，等待任务，如果已达到核心线程数，这个方法返回 false，否则返回 true；
-- `prestartAllCoreThreads()`：启动所有的核心线程，并返回启动成功的核心线程数。
+- `boolean status = prestartCoreThread()`：启动一个核心线程，等待任务，如果已达到核心线程数，这个方法返回 false，否则返回 true；
+- `int coreThreadNum = prestartAllCoreThreads()`：启动所有的核心线程，并返回启动成功的核心线程数。
+
+> ### 🧠 一、行为说明
+>
+> 每调用一次 `prestartCoreThread()`：
+>
+> - 如果当前线程数 < corePoolSize → 创建线程
+> - 否则返回 `false`
+>
+> ### 🧠 二、线程预热后在干嘛？
+>
+> 预热后的线程会执行到：
+>
+> ```
+> workQueue.take();
+> ```
+>
+> 👉 状态是：
+>
+> ```
+> 阻塞等待任务（空闲但已创建）
+> ```
+>
+> ### 🎯 三、什么时候用？
+>
+> **✔ 推荐场景**
+>
+> - 服务刚启动就有请求（Web / RPC）
+> - 对响应时间敏感（低延迟系统）
+> - 高频短任务
+>
+> ------
+>
+> **❌ 不推荐**
+>
+> - 定时任务（低频）
+> - 内存紧张环境
+>
+> ### ⚠️ 四、一个重要提醒
+>
+> 如果你同时设置：
+>
+> ```
+> executor.allowCoreThreadTimeOut(true);
+> executor.prestartAllCoreThreads();
+> ```
+>
+> 👉 会发生：
+>
+> ```
+> 预热 → 空闲 → 超时 → 线程被回收
+> ```
+>
+> 👉 等于白预热
+>
+> ### 🎯 一句话总结
+>
+> `prestartCoreThread()` / `prestartAllCoreThreads()`  的作用是：让核心线程提前进入“待命状态”，避免首次任务执行时的线程创建开销。
 
 > ### 🧪 示例一：对比“是否预热”的差异（`prestartAllCoreThreads()` 为例，启动所有核心线程）
 >
@@ -2040,5 +2097,473 @@ new RejectedExecutionHandler() {
 > | ------ | ------------------ |
 > | 不预热 | 提交任务时才创建   |
 > | 预热   | 提交任务前就创建好 |
+
+> ### 🧪 示例二：prestartCoreThread() 单个启动
 >
+> ```java
+> ThreadPoolExecutor executor = new ThreadPoolExecutor(
+>         3, 3, 60, TimeUnit.SECONDS,
+>         new LinkedBlockingQueue<>()
+> );
 > 
+> System.out.println("初始线程数：" + executor.getPoolSize());
+> 
+> boolean result1 = executor.prestartCoreThread();
+> System.out.println("启动一个核心线程：" + result1);
+> System.out.println("当前线程数：" + executor.getPoolSize());
+> 
+> boolean result2 = executor.prestartCoreThread();
+> boolean result3 = executor.prestartCoreThread();
+> boolean result4 = executor.prestartCoreThread(); // 已达core数量
+> 
+> System.out.println("第4次启动是否成功：" + result4);
+> System.out.println("最终线程数：" + executor.getPoolSize());
+> 
+> executor.shutdown();
+> ```
+>
+> 🔍 输出
+>
+> ```java
+> 初始线程数：0
+> 启动一个核心线程：true
+> 当前线程数：1
+> 第4次启动是否成功：false
+> 最终线程数：3
+> ```
+>
+> ### 实例三、prestartCoreThread() 单个启动 失败
+>
+> ```java
+> // 3.预热一个核心线程
+>         System.out.println("\n==================\n预热1个核心线程池\n==================");
+>         ThreadPoolExecutor threadPoolExecutor3 = new ThreadPoolExecutor(
+>                 2,
+>                 2,
+>                 60,
+>                 TimeUnit.SECONDS,
+>                 new LinkedBlockingQueue<>()
+>         );
+>         // 3.1、预热第一个核心线程
+>         boolean prestarted = threadPoolExecutor3.prestartCoreThread();
+>         System.out.println("提交任务3.1前，线程池中的线程数：" + threadPoolExecutor3.getPoolSize() + "，预热结果为：" + prestarted);
+> 
+>         // 3.2、execute() 也会创建线程
+>         threadPoolExecutor3.execute(() -> {
+>             System.out.println("任务3.1执行的线程为：" + Thread.currentThread().getName());
+>         });
+>         System.out.println("提交任务3.1后，线程池中的线程数：" + threadPoolExecutor3.getPoolSize());
+> 
+>         // 3.3、此时核心线程数已经达到2个，继续创建核心线程失败
+>         prestarted = threadPoolExecutor3.prestartCoreThread();
+>         System.out.println("提交任务3.2前，线程池中的线程数：" + threadPoolExecutor3.getPoolSize() + "，预热结果为：" + prestarted);
+>         threadPoolExecutor3.execute(() -> {
+>             System.out.println("任务3.2执行的线程为：" + Thread.currentThread().getName());
+>         });
+>         System.out.println("提交任务3.2后，线程池中的线程数：" + threadPoolExecutor3.getPoolSize());
+> ```
+>
+> #### 🔥 四、为什么“第二次预热失败”？
+>
+> 关键点👉 `execute()` 也会创建线程！
+
+## 13、⭐️线程池中线程异常后，销毁还是复用？
+
+直接说结论，需要分两种情况：
+
+- **使用`execute()`提交任务**：当任务通过`execute()`提交到线程池并在执行过程中抛出异常时，如果这个异常没有在任务内被捕获，那么该异常会导致当前线程终止，并且异常会被打印到控制台或日志文件中。线程池会检测到这种线程终止，并创建一个新线程来替换它，从而保持配置的线程数不变。
+
+  > 抛出异常
+
+- **使用`submit()`提交任务**：对于通过`submit()`提交的任务，如果在任务执行中发生异常，这个异常不会直接打印出来。相反，异常会被封装在由`submit()`返回的`Future`对象中。当调用`Future.get()`方法时，可以捕获到一个`ExecutionException`。在这种情况下，线程不会因为异常而终止，它会继续存在于线程池中，准备执行后续的任务。
+
+简单来说：使用`execute()`时，未捕获异常导致线程终止，线程池创建新线程替代；使用`submit()`时，异常被封装在`Future`中，线程继续复用。
+
+这种设计允许`submit()`提供更灵活的错误处理机制，因为它允许调用者决定如何处理异常，而`execute()`则适用于那些不需要关注执行结果的场景。
+
+具体的源码分析可以参考这篇：[线程池中线程异常后：销毁还是复用？ - 京东技术](./References\“线程池中线程异常后：销毁还是复用？”.mhtml)。
+
+> ### 一、案例代码
+>
+> ```java
+> public class thradExecuteAndSubmitException {
+>     public static void main(String[] args) throws Exception{
+>         System.out.println("\n============== execute()提交任务 ==============");
+>         // 线程池仅提供1个线程，方便观察抛出异常后的线程处理方式
+>         ThreadPoolExecutor executeExecutor = new ThreadPoolExecutor(
+>                 1, 1, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>()
+>         );
+> 
+>         executeExecutor.execute(() -> {
+>             System.out.println("任务1线程：" + Thread.currentThread().getName());
+>             throw new RuntimeException("任务1异常");
+>         });
+> 
+>         Thread.sleep(1000);
+>         executeExecutor.execute(() -> {
+>             System.out.println("任务2线程：" + Thread.currentThread().getName());
+>         });
+> 
+>         Thread.sleep(1000);
+>         executeExecutor.shutdown();
+> 
+>         System.out.println("\n============== submit()提交任务 ==============");
+>         // 线程池仅提供1个线程，方便观察抛出异常后的线程处理方式
+>         ThreadPoolExecutor submitExecutor = new ThreadPoolExecutor(
+>                 1, 1, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>()
+>         );
+> 
+>         Future future = submitExecutor.submit(() -> {
+>             System.out.println("任务1线程：" + Thread.currentThread().getName());
+>             throw new RuntimeException("任务1异常");
+>         });
+>         Thread.sleep(1000);
+>         submitExecutor.submit(() -> {
+>             System.out.println("任务2线程：" + Thread.currentThread().getName());
+>         });
+>         try {
+>             future.get();
+>         }catch (ExecutionException e){
+>             System.out.println("捕获异常：" + e.getCause());
+>         }
+>         Thread.sleep(1000);
+>         submitExecutor.shutdown();
+>     }
+> }
+> ```
+>
+> **🔍 输出结果**
+>
+> ```java
+> ============== execute()提交任务 ==============
+> 任务1线程：pool-1-thread-1
+> Exception in thread "pool-1-thread-1" java.lang.RuntimeException: 任务1异常
+> 	at com.gc.multithreaddemo.demos.threadPool.thradExecuteAndSubmitException.lambda$main$0(thradExecuteAndSubmitException.java:20)
+> 	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+> 	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+> 	at java.base/java.lang.Thread.run(Thread.java:833)
+> 任务2线程：pool-1-thread-2
+> 
+> ============== submit()提交任务 ==============
+> 任务1线程：pool-2-thread-1
+> 捕获异常：java.lang.RuntimeException: 任务1异常
+> 任务2线程：pool-2-thread-1
+> ```
+>
+> **🧠 关键现象**
+>
+> - `execute()` 提交的任务中，线程名发生了变化：`thread-1 → thread-2`
+>
+>   > 说明：
+>   >
+>   >  ❗ 第一个线程**挂了（终止）**
+>   >  ❗ 线程池**新建了一个线程**来补位
+>
+>   > 📌 为什么会这样？
+>   >
+>   > 在 ThreadPoolExecutor 中：
+>   >
+>   > - `execute()` → 直接执行 `Runnable`
+>   > - 未捕获异常 → **直接抛出到线程外**
+>   > - JVM 会终止该线程
+>
+> - `submit()` 提交的任务中，线程名没有变：`thread-1 → thread-1`
+>
+>   > 说明：
+>   >
+>   >  ❗ 线程**没有挂掉**
+>   >  ❗ 被**复用**了
+>
+>   > ⚠️ 那异常去哪了？
+>   >
+>   > 在 `submit()` 中：任务会被包装成 `FutureTask` 
+>   >
+>   > 🔍 `FutureTask` 的核心逻辑:
+>   >
+>   > ```java
+>   > try {
+>   >     result = callable.call();
+>   > } catch (Throwable ex) {
+>   >     setException(ex); // 👈 捕获异常
+>   > }
+>   > ```
+>   >
+>   > 👉 结论：
+>   >
+>   > 异常被捕获，不会抛出线程外
+>
+> ### 二、**🧪 如何获取异常？**
+>
+> 必须调用：
+>
+> ```java
+> future.get();
+> ```
+>
+> 代码👇
+>
+> ```java
+> try {
+>     future.get();
+> } catch (ExecutionException e) {
+>     System.out.println("捕获异常：" + e.getCause());
+> }
+> ```
+>
+> ### 🧠 三、本质区别总结（非常重要）
+>
+> | 对比项       | execute() | submit() |
+> | ------------ | --------- | -------- |
+> | 异常传播     | 直接抛出  | 被封装   |
+> | 是否打印异常 | ✅         | ❌        |
+> | 线程是否终止 | ✅         | ❌        |
+> | 是否复用线程 | ❌         | ✅        |
+>
+> ### 🚨 四、生产建议
+>
+> ✔ 更推荐方式
+>
+> ```java
+> executor.submit(() -> {
+>     try {
+>         // 业务逻辑
+>     } catch (Exception e) {
+>         log.error("任务异常", e);
+>     }
+> });
+> ```
+
+## 14、⭐️如何给线程池命名？
+
+初始化线程池的时候需要显示命名（设置线程池名称前缀），有利于定位问题。
+
+默认情况下创建的线程名字类似 `pool-1-thread-n` 这样的，没有业务含义，不利于我们定位问题。
+
+给线程池里的线程命名通常有下面两种方式：
+
+### **1、利用 guava 的 `ThreadFactoryBuilder`**
+
+```java
+ThreadFactory threadFactory = new ThreadFactoryBuilder()
+                        .setNameFormat(threadNamePrefix + "-%d")
+                        .setDaemon(true).build();
+ExecutorService threadPool = new ThreadPoolExecutor(corePoolSize, maximumPoolSize, keepAliveTime, TimeUnit.MINUTES, workQueue, threadFactory);
+```
+
+> ### 🧪 示例代码
+>
+> ```java
+> import com.google.common.util.concurrent.ThreadFactoryBuilder;
+> 
+> import java.util.concurrent.*;
+> 
+> public class GuavaThreadFactoryDemo {
+> 
+>     public static void main(String[] args) {
+> 
+>         ThreadFactory threadFactory = new ThreadFactoryBuilder()
+>                 .setNameFormat("order-pool-%d")   // 线程名格式
+>                 .setDaemon(false)                 // 是否守护线程
+>                 .build();
+> 
+>         ExecutorService executor = new ThreadPoolExecutor(
+>                 2,
+>                 2,
+>                 60,
+>                 TimeUnit.SECONDS,
+>                 new LinkedBlockingQueue<>(),
+>                 threadFactory	// 自定义的线程工厂
+>         );
+> 
+>         for (int i = 1; i <= 3; i++) {
+>             executor.execute(() -> {
+>                 System.out.println("当前线程：" + Thread.currentThread().getName());
+>             });
+>         }
+> 
+>         executor.shutdown();
+>     }
+> }
+> ```
+>
+> ### 🔍 输出示例
+>
+> ```java
+> 当前线程：order-pool-0
+> 当前线程：order-pool-1
+> 当前线程：order-pool-0
+> ```
+>
+> ### 🧠 说明
+>
+> - `setNameFormat("order-pool-%d")`
+>   - `%d` 会自动递增（0、1、2…）
+> - 可以快速统一线程命名规范
+> - 还支持：
+>   - `setDaemon(true)`（守护线程）
+>   - `setPriority()`（优先级）
+
+### **2、自己实现 `ThreadFactory`。**
+
+```java
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * 线程工厂，它设置线程名称，有利于我们定位问题。
+ */
+public final class NamingThreadFactory implements ThreadFactory {
+
+    private final AtomicInteger threadNum = new AtomicInteger();
+    private final String name;
+
+    /**
+     * 创建一个带名字的线程池生产工厂
+     */
+    public NamingThreadFactory(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public Thread newThread(Runnable r) {
+        Thread t = new Thread(r);
+        t.setName(name + " [#" + threadNum.incrementAndGet() + "]");
+        return t;
+    }
+}
+```
+
+> ### 🧪 示例代码
+>
+> ```java
+> import java.util.concurrent.*;
+> import java.util.concurrent.atomic.AtomicInteger;
+> 
+> public class CustomThreadFactoryDemo {
+> 
+>     public static void main(String[] args) {
+> 
+>         ThreadFactory factory = new NamingThreadFactory("payment-pool");
+> 
+>         ExecutorService executor = new ThreadPoolExecutor(
+>                 2,
+>                 2,
+>                 60,
+>                 TimeUnit.SECONDS,
+>                 new LinkedBlockingQueue<>(),
+>                 factory
+>         );
+> 
+>         for (int i = 1; i <= 3; i++) {
+>             executor.execute(() -> {
+>                 System.out.println("当前线程：" + Thread.currentThread().getName());
+>             });
+>         }
+> 
+>         executor.shutdown();
+>     }
+> }
+> 
+> // 👇 自定义线程工厂
+> class NamingThreadFactory implements ThreadFactory {
+> 
+>     private final AtomicInteger threadNum = new AtomicInteger(1);
+>     private final String name;
+> 
+>     public NamingThreadFactory(String name) {
+>         this.name = name;
+>     }
+> 
+>     @Override
+>     public Thread newThread(Runnable r) {
+>         Thread t = new Thread(r);
+>         t.setName(name + "-thread-" + threadNum.getAndIncrement());
+>         return t;
+>     }
+> }
+> ```
+>
+> ### 🔍 输出示例
+>
+> ```
+> 当前线程：payment-pool-thread-1
+> 当前线程：payment-pool-thread-2
+> 当前线程：payment-pool-thread-1
+> ```
+>
+> ### 🧠 说明
+>
+> - 使用 `AtomicInteger` 保证线程编号线程安全
+>
+> - 你可以在这里做更多事情：
+>
+>   ```java
+>   t.setDaemon(true);
+>   t.setPriority(Thread.NORM_PRIORITY);
+>   t.setUncaughtExceptionHandler((thread, ex) -> {
+>       System.out.println("线程异常：" + thread.getName());
+>   });
+>   ```
+
+
+
+### 3、二者对比
+
+| 维度     | Guava  | 自定义     |
+| -------- | ------ | ---------- |
+| 易用性   | ⭐⭐⭐⭐⭐  | ⭐⭐⭐        |
+| 灵活性   | ⭐⭐⭐    | ⭐⭐⭐⭐⭐      |
+| 代码量   | 少     | 多         |
+| 生产推荐 | ✅ 常用 | ✅ 高级场景 |
+
+## 15、如何设定线程池的大小？
+
+很多人甚至可能都会觉得把线程池配置过大一点比较好！我觉得这明显是有问题的。就拿我们生活中非常常见的一例子来说：**并不是人多就能把事情做好，增加了沟通交流成本。你本来一件事情只需要 3 个人做，你硬是拉来了 6 个人，会提升做事效率嘛？我想并不会。** 线程数量过多的影响也是和我们分配多少人做事情一样，对于多线程这个场景来说主要是增加了**上下文切换**成本。不清楚什么是上下文切换的话，可以看我下面的介绍。
+
+> 上下文切换：
+>
+> 多线程编程中一般线程的个数都大于 CPU 核心的个数，而一个 CPU 核心在任意时刻只能被一个线程使用，为了让这些线程都能得到有效执行，CPU 采取的策略是为每个线程分配时间片并轮转的形式。当一个线程的时间片用完的时候就会重新处于就绪状态让给其他线程使用，这个过程就属于一次上下文切换。概括来说就是：当前任务在执行完 CPU 时间片切换到另一个任务之前会先保存自己的状态，以便下次再切换回这个任务时，可以再加载这个任务的状态。**任务从保存到再加载的过程就是一次上下文切换**。
+>
+> 上下文切换通常是计算密集型的。也就是说，它需要相当可观的处理器时间，在每秒几十上百次的切换中，每次切换都需要纳秒量级的时间。所以，上下文切换对系统来说意味着消耗大量的 CPU 时间，事实上，可能是操作系统中时间消耗最大的操作。
+>
+> Linux 相比与其他操作系统（包括其他类 Unix 系统）有很多的优点，其中有一项就是，其上下文切换和模式切换的时间消耗非常少。
+
+类比于现实世界中的人类通过合作做某件事情，我们可以肯定的一点是线程池大小设置过大或者过小都会有问题，合适的才是最好。
+
+- 如果我们设置的线程池数量太小的话，如果同一时间有大量任务/请求需要处理，可能会导致大量的请求/任务在任务队列中排队等待执行，甚至会出现任务队列满了之后任务/请求无法处理的情况，或者大量任务堆积在任务队列导致 OOM。这样很明显是有问题的，CPU 根本没有得到充分利用。
+- 如果我们设置线程数量太大，大量线程可能会同时在争取 CPU 资源，这样会导致大量的上下文切换，从而增加线程的执行时间，影响了整体执行效率。
+
+有一个简单并且适用面比较广的公式：
+
+- **CPU 密集型任务(N+1)：** 这种任务消耗的主要是 CPU 资源，可以将线程数设置为 N（CPU 核心数）+1。比 CPU 核心数多出来的一个线程是为了防止线程偶发的缺页中断，或者其它原因导致的任务暂停而带来的影响。一旦任务暂停，CPU 就会处于空闲状态，而在这种情况下多出来的一个线程就可以充分利用 CPU 的空闲时间。
+- **I/O 密集型任务(2N)：** 这种任务应用起来，系统会用大部分的时间来处理 I/O 交互，而线程在处理 I/O 的时间段内不会占用 CPU 来处理，这时就可以将 CPU 交出给其它线程使用。因此在 I/O 密集型任务的应用中，我们可以多配置一些线程，具体的计算方法是 2N。
+
+**如何判断是 CPU 密集任务还是 IO 密集任务？**
+
+- CPU 密集型简单理解就是利用 CPU 计算能力的任务比如你在内存中对大量数据进行排序。
+- 但凡涉及到网络读取，文件读取这类都是 IO 密集型，这类任务的特点是 CPU 计算耗费时间相比于等待 IO 操作完成的时间来说很少，大部分时间都花在了等待 IO 操作完成上，因此线程是“空闲”的，可以切换去执行其他任务，从而提高 CPU 利用率。
+
+> 🌈 拓展一下（参见：[issue#1737](https://github.com/Snailclimb/JavaGuide/issues/1737)）：
+>
+> 线程数更严谨的计算的方法应该是：`最佳线程数 = N（CPU 核心数）∗（1+WT（线程等待时间）/ST（线程计算时间））`，其中 `WT（线程等待时间）=线程运行总时间 - ST（线程计算时间）`。
+>
+> 线程等待时间所占比例越高，需要越多线程。线程计算时间所占比例越高，需要越少线程。
+>
+> 我们可以通过 JDK 自带的工具 VisualVM 来查看 `WT/ST` 比例。
+>
+> CPU 密集型任务的 `WT/ST` 接近或者等于 0，因此， 线程数可以设置为 N（CPU 核心数）∗（1+0）= N，和我们上面说的 N（CPU 核心数）+1 差不多。
+>
+> IO 密集型任务下，几乎全是线程等待时间，从理论上来说，你就可以将线程数设置为 2N（按道理来说，WT/ST 的结果应该比较大，这里选择 2N 的原因应该是为了避免创建过多线程吧）。
+
+公式也只是参考，具体还是要根据项目实际线上运行情况来动态调整。我在后面介绍的美团的线程池参数动态配置这种方案就非常不错，很实用！
+
+## 16、⭐️如何动态修改线程池的参数？
+
+美团技术团队在[《Java 线程池实现原理及其在美团业务中的实践》](./References\Java线程池实现原理及其在美团业务中的实践 - 美团技术团队.mhtml)这篇文章中介绍到对线程池参数实现可自定义配置的思路和方法。
+
+美团技术团队的思路是主要对线程池的核心参数实现自定义可配置。这三个核心参数是：
+
+- **`corePoolSize` :** 核心线程数定义了最小可以同时运行的线程数量。
+- **`maximumPoolSize` :** 当队列中存放的任务达到队列容量的时候，当前可以同时运行的线程数量变为最大线程数。
+- **`workQueue`:** 当新任务来的时候会先判断当前运行的线程数量是否达到核心线程数，如果达到的话，新任务就会被存放在队列中。
+
