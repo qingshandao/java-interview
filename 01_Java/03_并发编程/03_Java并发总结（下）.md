@@ -2605,7 +2605,7 @@ public final class NamingThreadFactory implements ThreadFactory {
 
 要想让 `PriorityBlockingQueue` 实现对任务的排序，传入其中的任务必须是具备排序能力的，方式有两种：
 
-1. 提交到线程池的任务实现 `Comparable` 接口，并重写 `compareTo` 方法来指定任务之间的优先级比较规则。
+1. 提交到线程池的任务（Task）实现 `Comparable` 接口，并重写 `compareTo` 方法来指定任务之间的优先级比较规则。
 
    > ```java
    > import java.util.concurrent.*;
@@ -2763,3 +2763,1311 @@ public final class NamingThreadFactory implements ThreadFactory {
 
 对于性能方面的影响，是没办法避免的，毕竟需要对任务进行排序操作。并且，对于大部分业务场景来说，这点性能影响是可以接受的。
 
+# 三、Future
+
+重点是要掌握 `CompletableFuture` 的使用以及常见面试题。
+
+除了下面的面试题之外，还推荐你看看我写的这篇文章： [CompletableFuture 详解](./★重要知识点\10_CompletableFuture详解.md)。
+
+## 1、Future 类有什么用？
+
+`Future` 类是异步思想的典型运用，主要用在一些需要执行耗时任务的场景，避免程序一直原地等待耗时任务执行完成，执行效率太低。具体来说是这样的：当我们执行某一耗时的任务时，可以将这个耗时任务交给一个子线程去异步执行，同时我们可以干点其他事情，不用傻傻等待耗时任务执行完成。等我们的事情干完后，我们再通过 `Future` 类获取到耗时任务的执行结果。这样一来，程序的执行效率就明显提高了。
+
+这其实就是多线程中经典的 **Future 模式**，你可以将其看作是一种设计模式，核心思想是异步调用，主要用在多线程领域，并非 Java 语言独有。
+
+在 Java 中，`Future` 类只是一个泛型接口，位于 `java.util.concurrent` 包下，其中定义了 5 个方法，主要包括下面这 4 个功能：
+
+- 取消任务；
+- 判断任务是否被取消;
+- 判断任务是否已经执行完成;
+- 获取任务执行结果。
+
+```java
+// V 代表了Future执行的任务返回值的类型
+public interface Future<V> {
+    // 取消任务执行
+    // 成功取消返回 true，否则返回 false
+    boolean cancel(boolean mayInterruptIfRunning);
+    // 判断任务是否被取消
+    boolean isCancelled();
+    // 判断任务是否已经执行完成
+    boolean isDone();
+    // 获取任务执行结果
+    V get() throws InterruptedException, ExecutionException;
+    // 指定时间内没有返回计算结果就抛出 TimeOutException 异常
+    V get(long timeout, TimeUnit unit)
+
+        throws InterruptedException, ExecutionException, TimeoutExceptio
+
+}
+```
+
+简单理解就是：我有一个任务，提交给了 `Future` 来处理。任务执行期间我自己可以去做任何想做的事情。并且，在这期间我还可以取消任务以及获取任务的执行状态。一段时间之后，我就可以 `Future` 那里直接取出任务执行结果。
+
+> ### 一、示例
+>
+> ```java
+> import java.util.concurrent.*;
+> 
+> public class FutureDemo {
+> 
+>     public static void main(String[] args) throws Exception {
+> 
+>         ExecutorService executor = Executors.newFixedThreadPool(2);
+> 
+>         // 1️⃣ 提交任务（返回 Future）
+>         Future<Integer> future = executor.submit(() -> {
+>             System.out.println("任务开始执行：" + Thread.currentThread().getName());
+> 
+>             for (int i = 1; i <= 5; i++) {
+>                 Thread.sleep(1000); // 模拟耗时任务
+>                 System.out.println("任务执行中..." + i);
+>             }
+> 
+>             return 100;
+>         });
+> 
+>         // 2️⃣ 主线程可以做别的事情
+>         for (int i = 1; i <= 3; i++) {
+>             Thread.sleep(800);
+>             System.out.println("主线程在做其他事情..." + i);
+>         }
+> 
+>         // 3️⃣ 查询任务状态
+>         System.out.println("任务是否完成：" + future.isDone());
+>         System.out.println("任务是否取消：" + future.isCancelled());
+> 
+>         // 4️⃣ 尝试取消任务（可选）
+>         // boolean cancelled = future.cancel(true);
+>         // System.out.println("是否成功取消：" + cancelled);
+> 
+>         // 5️⃣ 获取执行结果（会阻塞直到完成）
+>         try {
+>             Integer result = future.get();
+>             System.out.println("任务执行结果：" + result);
+>         } catch (CancellationException e) {
+>             System.out.println("任务被取消");
+>         } catch (ExecutionException e) {
+>             System.out.println("任务执行异常：" + e.getCause());
+>         }
+> 
+>         executor.shutdown();
+>     }
+> }
+> ```
+>
+> ### 二、🔍 运行过程拆解
+>
+> #### 🟢 1️⃣ 提交任务
+>
+> ```java
+> Future<Integer> future = executor.submit(...)
+> ```
+>
+> 👉 返回一个 `Future`
+>
+> 你可以通过它：
+>
+> - 拿结果
+> - 查状态
+> - 取消任务
+>
+> ### 🟡 2️⃣ 主线程继续执行
+>
+> ```java
+> 主线程在做其他事情...
+> 任务执行中...
+> ```
+>
+> 👉 **异步执行的核心价值**
+>
+> #### 🔵 3️⃣ 查询状态
+>
+> ```java
+> future.isDone();       // 是否完成
+> future.isCancelled();  // 是否取消
+> ```
+>
+> #### 🔴 4️⃣ 取消任务（可选）
+>
+> ```java
+> future.cancel(true);
+> ```
+>
+> 👉 参数说明：
+>
+> | 参数  | 含义                 |
+> | ----- | -------------------- |
+> | true  | 尝试中断线程         |
+> | false | 不中断（仅标记取消） |
+>
+> ⚠️ 注意：
+>
+> 👉 是否真的能取消成功，取决于：
+>
+> ```java
+> 任务是否响应中断（比如 sleep / IO / 手动检查）
+> ```
+>
+> #### 🟣 5️⃣ 获取结果
+>
+> ```java
+> future.get();
+> ```
+>
+> 👉 特点：
+>
+> ```
+> 阻塞等待直到任务完成
+> ```
+>
+> ------
+>
+> #### ✔ 可加超时
+>
+> ```java
+> future.get(3, TimeUnit.SECONDS);
+> ```
+>
+> ### ⚠️ 常见坑（非常重要）
+>
+> #### ❌ 坑1：直接 get 导致“同步化”
+>
+> ```java
+> future.get(); // 立刻调用
+> ```
+>
+> 👉 等价于：
+>
+> ```java
+> 同步执行（失去异步意义）
+> ```
+>
+> > - 改进方案一：延迟 get（最简单）
+> >
+> >   > 👉 核心思路：**不要立刻 get**
+> >   >
+> >   > ```java
+> >   > Future<Integer> future = executor.submit(task);
+> >   > 
+> >   > // 先干别的
+> >   > doSomething();
+> >   > doSomethingElse();
+> >   > 
+> >   > // 最后再取结果
+> >   > Integer result = future.get();
+> >   > ```
+> >   >
+> >   >  🧠 适用场景
+> >   >
+> >   > - 有“其他工作”可以穿插执行
+> >   > - 只是想避免“无意义等待”
+> >
+> > - 改进方案二：轮询 + 非阻塞
+> >
+> >   > 👉 避免长时间阻塞
+> >   >
+> >   > ```java
+> >   > while (!future.isDone()) {
+> >   >     System.out.println("任务还没完成，先做点别的...");
+> >   >     Thread.sleep(200);
+> >   > }
+> >   > 
+> >   > Integer result = future.get();
+> >   > ```
+> >   >
+> >   > 👉 这是“**伪异步**”，仍然不优雅：
+> >   >
+> >   > - 有轮询开销
+> >   > - 延迟不可控
+> >
+> > - 改进方案三：带超时的 get（推荐基础版）
+> >
+> >   > 👉 防止线程一直卡死
+> >   >
+> >   > ```java
+> >   > try {
+> >   >     Integer result = future.get(2, TimeUnit.SECONDS);
+> >   > } catch (TimeoutException e) {
+> >   >     System.out.println("任务超时，放弃等待");
+> >   > }
+> >   > ```
+> >   >
+> >   > ## 🧠 优点
+> >   >
+> >   > - 不会无限阻塞
+> >   > - 可控超时
+> >
+> > - 🚀 改进方案（推荐）：使用 `CompletableFuture`,  这是**真正的异步编程方式**
+> >
+> >   
+>
+> #### ❌ 坑2：取消不一定生效
+>
+> 如果任务是：
+>
+> ```
+> while(true) {}
+> ```
+>
+> 👉 cancel(true) 也没用 ❌
+>
+> > #### ✔ 正确写法（支持取消）
+> >
+> > ```java
+> > while (!Thread.currentThread().isInterrupted()) {
+> >     // 执行任务
+> > }
+> > ```
+> >
+> > 
+
+## 2、Callable 和 Future 有什么关系？
+
+我们可以通过 `FutureTask` 来理解 `Callable` 和 `Future` 之间的关系。
+
+`FutureTask` 提供了 `Future` 接口的基本实现，常用来封装 `Callable` 和 `Runnable`，具有取消任务、查看任务是否执行完成以及获取任务执行结果的方法。`ExecutorService.submit()` 方法返回的其实就是 `Future` 的实现类 `FutureTask` 。
+
+```java
+<T> Future<T> submit(Callable<T> task);
+Future<?> submit(Runnable task);
+```
+
+`FutureTask` 不光实现了 `Future`接口，还实现了`Runnable` 接口，因此可以作为任务直接被线程执行。
+
+![](./assets/completablefuture-class-diagram.jpg)
+
+`FutureTask` 有两个构造函数，可传入 `Callable` 或者 `Runnable` 对象。实际上，传入 `Runnable` 对象也会在方法内部转换为`Callable` 对象。
+
+```java
+public FutureTask(Callable<V> callable) {
+    if (callable == null)
+        throw new NullPointerException();
+    this.callable = callable;
+    this.state = NEW;
+}
+public FutureTask(Runnable runnable, V result) {
+    // 通过适配器RunnableAdapter来将Runnable对象runnable转换成Callable对象
+    this.callable = Executors.callable(runnable, result);
+    this.state = NEW;
+}
+```
+
+`FutureTask`相当于对`Callable` 进行了封装，管理着任务执行的情况，存储了 `Callable` 的 `call` 方法的任务执行结果。
+
+关于更多 `Future` 的源码细节，可以肝这篇万字解析，写的很清楚：[Java 是如何实现 Future 模式的？万字详解！](./References\Java是如何实现Future模式的？万字详解！我们分析源码的目的是什么？除了弄懂`FutureTask`的内部实现原理 - 掘金.mhtml)。
+
+## 3、CompletableFuture 类有什么用？
+
+`Future` 在实际使用过程中存在一些局限性，比如不支持异步任务的编排组合、获取计算结果的 `get()` 方法为阻塞调用。
+
+Java 8 才被引入`CompletableFuture` 类可以解决`Future` 的这些缺陷。`CompletableFuture` 除了提供了更为好用和强大的 `Future` 特性之外，还提供了函数式编程、异步任务编排组合（可以将多个异步任务串联起来，组成一个完整的链式调用）等能力。
+
+下面我们来简单看看 `CompletableFuture` 类的定义。
+
+```java
+public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
+}
+```
+
+可以看到，`CompletableFuture` 同时实现了 `Future` 和 `CompletionStage` 接口。
+
+![](./assets/completablefuture-class-diagram.jpg)
+
+`CompletionStage` 接口描述了一个异步计算的阶段。很多计算可以分成多个阶段或步骤，此时可以通过它将所有步骤组合起来，形成异步计算的流水线。
+
+`CompletionStage` 接口中的方法比较多，`CompletableFuture` 的函数式能力就是这个接口赋予的。从这个接口的方法参数你就可以发现其大量使用了 Java8 引入的函数式编程。
+
+![](./assets/image-20210902093026059.png)
+
+## 4、⭐️一个任务需要依赖另外两个任务执行完之后再执行，怎么设计？
+
+这种任务编排场景非常适合通过`CompletableFuture`实现。这里假设要实现 T3 在 T2 和 T1 执行完后执行。
+
+代码如下（这里为了简化代码，用到了 Hutool 的线程工具类 `ThreadUtil` 和日期时间工具类 `DateUtil`）：
+
+```java
+// T1
+CompletableFuture<Void> futureT1 = CompletableFuture.runAsync(() -> {
+    System.out.println("T1 is executing. Current time：" + DateUtil.now());
+    // 模拟耗时操作
+    ThreadUtil.sleep(1000);
+});
+// T2
+CompletableFuture<Void> futureT2 = CompletableFuture.runAsync(() -> {
+    System.out.println("T2 is executing. Current time：" + DateUtil.now());
+    ThreadUtil.sleep(1000);
+});
+
+// 使用allOf()方法合并T1和T2的CompletableFuture，等待它们都完成
+CompletableFuture<Void> bothCompleted = CompletableFuture.allOf(futureT1, futureT2);
+// 当T1和T2都完成后，执行T3
+bothCompleted.thenRunAsync(() -> System.out.println("T3 is executing after T1 and T2 have completed.Current time：" + DateUtil.now()));
+// 等待所有任务完成，验证效果
+ThreadUtil.sleep(3000);
+```
+
+通过 `CompletableFuture` 的 `allOf()` 这个静态方法来并行运行 T1 和 T2，当 T1 和 T2 都完成后，再执行（`thenRunAsync()`） T3。
+
+## 5、⭐️使用 CompletableFuture，有一个任务失败，如何处理异常？
+
+使用 `CompletableFuture`的时候一定要以正确的方式进行异常处理，避免异常丢失或者出现不可控问题。
+
+下面是一些建议：
+
+- 使用 `whenComplete` 方法可以在任务完成时触发回调函数，并正确地处理异常，而不是让异常被吞噬或丢失。
+- 使用 `exceptionally` 方法可以处理异常并重新抛出，以便异常能够传播到后续阶段，而不是让异常被忽略或终止。
+- 使用 `handle` 方法可以处理正常的返回结果和异常，并返回一个新的结果，而不是让异常影响正常的业务逻辑。
+- 使用 `CompletableFuture.allOf` 方法可以组合多个 `CompletableFuture`，并统一处理所有任务的异常，而不是让异常处理过于冗长或重复。
+- ……
+
+## 6、⭐️在使用 CompletableFuture 的时候为什么要自定义线程池？
+
+`CompletableFuture` 默认使用全局共享的 `ForkJoinPool.commonPool()` 作为执行器，所有未指定执行器的异步任务都会使用该线程池。这意味着应用程序、多个库或框架（如 Spring、第三方库）若都依赖 `CompletableFuture`，默认情况下它们都会共享同一个线程池。
+
+虽然 `ForkJoinPool` 效率很高，但当同时提交大量任务时，可能会导致资源竞争和线程饥饿，进而影响系统性能。
+
+为避免这些问题，建议为 `CompletableFuture` 提供自定义线程池，带来以下优势：
+
+- 隔离性：为不同任务分配独立的线程池，避免全局线程池资源争夺。
+- 资源控制：根据任务特性调整线程池大小和队列类型，优化性能表现。
+- 异常处理：通过自定义 `ThreadFactory` 更好地处理线程中的异常情况。
+
+```java
+private ThreadPoolExecutor executor = new ThreadPoolExecutor(10, 10,
+        0L, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<Runnable>());
+
+CompletableFuture.runAsync(() -> {
+     //...
+}, executor);
+```
+
+
+
+# 四、AQS
+
+关于 AQS 源码的详细分析，可以看看这一篇文章：[AQS 详解](./★重要知识点\07_AQS详解.md)。
+
+## 1、AQS 是什么？
+
+AQS （`AbstractQueuedSynchronizer` ，抽象队列同步器）是从 JDK1.5 开始提供的 Java 并发核心组件。
+
+AQS 解决了开发者在实现同步器时的复杂性问题。它提供了一个通用框架，用于实现各种同步器，例如 **可重入锁**（`ReentrantLock`）、**信号量**（`Semaphore`）和 **倒计时器**（`CountDownLatch`）。通过封装底层的线程同步机制，AQS 将复杂的线程管理逻辑隐藏起来，使开发者只需专注于具体的同步逻辑。
+
+简单来说，AQS 是一个抽象类，为同步器提供了通用的 **执行框架**。它定义了 **资源获取和释放的通用流程**，而具体的资源获取逻辑则由具体同步器通过重写模板方法来实现。 因此，可以将 AQS 看作是同步器的 **基础“底座”**，而同步器则是基于 AQS 实现的 **具体“应用”** 
+
+ ## 2、⭐️AQS 的原理是什么？
+
+AQS 核心思想是，如果被请求的共享资源空闲，则将当前请求资源的线程设置为有效的工作线程，并且将共享资源设置为锁定状态。如果被请求的共享资源被占用，那么就需要一套线程阻塞等待以及被唤醒时锁分配的机制，这个机制 AQS 是基于 **CLH 锁** （Craig, Landin, and Hagersten locks） 进一步优化实现的。
+
+**CLH 锁** 对自旋锁进行了改进，是基于单链表的自旋锁。在多线程场景下，会将请求获取锁的线程组织成一个单向队列，每个等待的线程会通过自旋访问前一个线程节点的状态，前一个节点释放锁之后，当前节点才可以获取锁。**CLH 锁** 的队列结构如下图所示。
+
+![](./assets/clh-lock-queue-structure.png)
+
+AQS 中使用的 **等待队列** 是 CLH 锁队列的变体（接下来简称为 CLH 变体队列）。
+
+AQS 的 CLH 变体队列是一个 **双向队列**，暂时获取不到锁的线程将被加入到该队列中，CLH 变体队列和原本的 CLH 锁队列的区别主要有两点：
+
+- 由 **自旋** 优化为 **自旋 + 阻塞** ：自旋操作的性能很高，但大量的自旋操作比较占用 CPU 资源，因此在 CLH 变体队列中会先通过自旋尝试获取锁，如果失败再进行阻塞等待。
+- 由 **单向队列** 优化为 **双向队列** ：在 CLH 变体队列中，会对等待的线程进行阻塞操作，当队列前边的线程释放锁之后，需要对后边的线程进行唤醒，因此增加了 `next` 指针，成为了双向队列。
+
+AQS 将每条请求共享资源的线程封装成一个 CLH 变体队列的一个结点（Node）来实现锁的分配。在 CLH 变体队列中，一个节点表示一个线程，它保存着线程的引用（thread）、 当前节点在队列中的状态（waitStatus）、前驱节点（prev）、后继节点（next）。
+
+AQS 中的 CLH 变体队列结构如下图所示：
+
+![](./assets/clh-queue-structure-bianti.png)
+
+
+
+AQS(`AbstractQueuedSynchronizer`)的核心原理图：
+
+![](./assets/clh-queue-state.png)
+
+AQS 使用 **int 成员变量 `state` 表示同步状态**，通过内置的 **线程等待队列** 来完成获取资源线程的排队工作。
+
+`state` 变量由 `volatile` 修饰，用于展示当前临界资源的获锁情况。
+
+```java
+// 共享变量，使用volatile修饰保证线程可见性
+private volatile int state;
+```
+
+另外，状态信息 `state` 可以通过 `protected` 类型的`getState()`、`setState()`和`compareAndSetState()` 进行操作。并且，这几个方法都是 `final` 修饰的，在子类中无法被重写。
+
+```java
+//返回同步状态的当前值
+protected final int getState() {
+     return state;
+}
+ // 设置同步状态的值
+protected final void setState(int newState) {
+     state = newState;
+}
+//原子地（CAS操作）将同步状态值设置为给定值update如果当前同步状态的值等于expect（期望值）
+protected final boolean compareAndSetState(int expect, int update) {
+      return unsafe.compareAndSwapInt(this, stateOffset, expect, update);
+}
+```
+
+- 以 `ReentrantLock` 为例，`state` 初始值为 0，表示未锁定状态。A 线程 `lock()` 时，会调用 `tryAcquire()` 独占该锁并将 `state + 1` 。此后，其他线程再 `tryAcquire()` 时就会失败，直到 A 线程 `unlock()` 到 `state=`0（即释放锁）为止，其它线程才有机会获取该锁。当然，释放锁之前，A 线程自己是可以重复获取此锁的（`state` 会累加），这就是可重入的概念。但要注意，获取多少次就要释放多少次，这样才能保证 state 是能回到零态的。
+
+  > ### 一、ReentrantLock：可重入锁（state 递增/递减）
+  >
+  > #### 1、示例代码
+  >
+  > ```java
+  > import java.util.concurrent.locks.ReentrantLock;
+  > 
+  > public class ReentrantLockDemo {
+  > 
+  >     private static final ReentrantLock lock = new ReentrantLock();
+  > 
+  >     public static void main(String[] args) {
+  > 
+  >         new Thread(() -> {
+  >             lock.lock(); // 第一次加锁（state=1）
+  >             try {
+  >                 System.out.println("第一次获取锁：" + Thread.currentThread().getName());
+  > 
+  >                 // 模拟在同一线程中再次进入
+  >                 reentrantMethod();
+  > 
+  >             } finally {
+  >                 lock.unlock(); // 最后一次释放（state回到0）
+  >                 System.out.println("最终释放锁：" + Thread.currentThread().getName());
+  >             }
+  >         }, "A").start();
+  >     }
+  > 
+  >     private static void reentrantMethod() {
+  >         lock.lock(); // 第二次加锁（state=2）
+  >         try {
+  >             System.out.println("第二次获取锁（重入）：" + Thread.currentThread().getName());
+  >         } finally {
+  >             lock.unlock(); // 释放一次（state=1）
+  >             System.out.println("释放一次锁：" + Thread.currentThread().getName());
+  >         }
+  >     }
+  > }
+  > ```
+  >
+  > #### 2、🔍 运行逻辑
+  >
+  > ```java
+  > 初始 state = 0
+  > 
+  > 线程A lock()        → state = 1
+  > 再次 lock()         → state = 2（重入成功）
+  > 第一次 unlock()     → state = 1
+  > 第二次 unlock()     → state = 0（真正释放）
+  > ```
+  >
+  > #### 3、🧠 核心说明
+  >
+  > 👉 可重入的本质：
+  >
+  > ```
+  > 同一个线程可以多次获取同一把锁（state 累加）
+  > ```
+  >
+  > 👉 但必须满足：
+  >
+  > ```
+  > 加锁几次 → 就必须 unlock 几次
+  > ```
+  >
+  > 否则会出现：
+  >
+  > ```
+  > state > 0 → 锁永远不释放 ❌（死锁风险）
+  > ```
+  >
+  > 
+
+- 再以 `CountDownLatch` 以例，任务分为 N 个子线程去执行，`state` 也初始化为 N（注意 N 要与线程个数一致）。这 N 个子线程是并行执行的，每个子线程执行完后`countDown()` 一次，state 会 CAS(Compare and Swap) `减 1` 。等到所有子线程都执行完后(即 `state=0` )，会 `unpark()` 主调用线程，然后主调用线程就会从 `await()` 函数返回，继续后续动作。
+
+  > ### 🧪 一、CountDownLatch：计数归零再继续
+  >
+  > #### ✅ 1、示例代码
+  >
+  > ```java
+  > import java.util.concurrent.CountDownLatch;
+  > 
+  > public class CountDownLatchDemo {
+  > 
+  >     public static void main(String[] args) throws InterruptedException {
+  > 
+  >         int n = 3;
+  >         CountDownLatch latch = new CountDownLatch(n);
+  > 
+  >         // 启动3个子线程
+  >         for (int i = 1; i <= n; i++) {
+  >             int taskId = i;
+  >             new Thread(() -> {
+  >                 System.out.println("子线程" + taskId + "开始执行");
+  > 
+  >                 try {
+  >                     Thread.sleep(1000 * taskId); // 模拟耗时
+  >                 } catch (InterruptedException e) {
+  >                     e.printStackTrace();
+  >                 }
+  > 
+  >                 System.out.println("子线程" + taskId + "执行完成");
+  >                 latch.countDown(); // state - 1
+  >             }).start();
+  >         }
+  > 
+  >         System.out.println("主线程等待子线程执行完...");
+  > 
+  >         latch.await(); // 阻塞，直到 state=0
+  > 
+  >         System.out.println("所有子线程执行完毕，主线程继续执行！");
+  >     }
+  > }
+  > ```
+  >
+  > #### 🔍 2、执行流程
+  >
+  > ```java
+  > 初始 state = 3
+  > 
+  > 子线程1完成 → state = 2
+  > 子线程2完成 → state = 1
+  > 子线程3完成 → state = 0
+  > 
+  > 👉 唤醒主线程（unpark）
+  > ```
+  >
+  > #### 🧠 3、核心说明
+  >
+  > 👉 CountDownLatch 的本质：
+  >
+  > ```java
+  > 一个“倒计时门闩”
+  > ```
+  >
+  > #### 📌 4、两个关键方法
+  >
+  > 1️⃣ `countDown()`
+  >
+  > ```java
+  > state - 1（CAS 操作）
+  > ```
+  >
+  > 2️⃣ `await()`
+  >
+  > ```java
+  > 如果 state > 0 → 阻塞
+  > 如果 state = 0 → 继续执行
+  > ```
+  >
+  > 
+
+### 2.1、ReentrantLock 和 CountDownLatch 重要区别（面试必问）
+
+| 特性       | ReentrantLock | CountDownLatch |
+| ---------- | ------------- | -------------- |
+| 是否可重入 | ✅             | ❌              |
+| state含义  | 锁重入次数    | 计数器         |
+| 是否可复用 | ✅             | ❌（一次性）    |
+| 用途       | 互斥访问      | 线程协调       |
+
+- ✔ ReentrantLock
+
+  - 共享资源加锁
+
+  - 替代 synchronized
+
+  - 需要可中断锁 / 公平锁
+
+- ✔ CountDownLatch
+
+  - 多线程初始化
+  - 主线程等待子任务完成
+  - 并行任务汇总
+
+## 3、Semaphore 有什么用？
+
+`synchronized` 和 `ReentrantLock` 都是一次只允许一个线程访问某个资源，而`Semaphore`(信号量)可以用来控制同时访问特定资源的线程数量。
+
+Semaphore 的使用简单，我们这里假设有 N(N>5) 个线程来获取 `Semaphore` 中的共享资源，下面的代码表示同一时刻 N 个线程中只有 5 个线程能获取到共享资源，其他线程都会阻塞，只有获取到共享资源的线程才能执行。等到有线程释放了共享资源，其他阻塞的线程才能获取到。
+
+```java
+// 初始共享资源数量
+final Semaphore semaphore = new Semaphore(5);
+
+// 获取1个许可
+semaphore.acquire();
+
+// 释放1个许可
+semaphore.release();
+```
+
+当初始的资源个数为 1 的时候，`Semaphore` 退化为排他锁。
+
+`Semaphore` 有两种模式：
+
+- **公平模式：** 调用 `acquire()` 方法的顺序就是获取许可证的顺序，遵循 FIFO；
+- **非公平模式：** 抢占式的。
+
+`Semaphore` 对应的两个构造方法如下：
+
+```java
+public Semaphore(int permits) {
+    sync = new NonfairSync(permits);
+}
+
+public Semaphore(int permits, boolean fair) {
+    sync = fair ? new FairSync(permits) : new NonfairSync(permits);
+}
+```
+
+**这两个构造方法，都必须提供许可的数量，第二个构造方法可以指定是公平模式还是非公平模式，默认非公平模式。**
+
+`Semaphore` 通常用于那些资源有明确访问 **数量限制** 的场景比如限流（仅限于单机模式，实际项目中推荐使用 Redis +Lua 来做限流）。
+
+> 案例代码
+>
+> ```java
+> import java.util.concurrent.Semaphore;
+> 
+> public class SemaphoreDemo {
+> 
+>     public static void main(String[] args) {
+> 
+>         Semaphore semaphore = new Semaphore(2); // 2个许可证
+> 
+>         for (int i = 1; i <= 5; i++) {
+>             int taskId = i;
+> 
+>             new Thread(() -> {
+>                 try {
+>                     semaphore.acquire(); // 获取许可
+>                     System.out.println("任务" + taskId + "开始执行");
+> 
+>                     Thread.sleep(2000);
+> 
+>                     System.out.println("任务" + taskId + "执行结束");
+>                 } catch (InterruptedException e) {
+>                     e.printStackTrace();
+>                 } finally {
+>                     semaphore.release(); // 归还许可
+>                 }
+>             }).start();
+>         }
+>     }
+> }
+> ```
+>
+> 
+
+## 4、Semaphore 的原理是什么？
+
+`Semaphore` 是共享锁的一种实现，它默认构造 AQS 的 `state` 值为 `permits`，你可以将 `permits` 的值理解为许可证的数量，只有拿到许可证的线程才能执行。
+
+调用`semaphore.acquire()` ，线程尝试获取许可证，如果 `state >= 0` 的话，则表示可以获取成功。如果获取成功的话，使用 CAS 操作去修改 `state` 的值 `state=state-1`。如果 `state<0` 的话，则表示许可证数量不足。此时会创建一个 Node 节点加入阻塞队列，挂起当前线程。
+
+```java
+/**
+ *  获取1个许可证
+ */
+public void acquire() throws InterruptedException {
+    sync.acquireSharedInterruptibly(1);
+}
+/**
+ * 共享模式下获取许可证，获取成功则返回，失败则加入阻塞队列，挂起线程
+ */
+public final void acquireSharedInterruptibly(int arg)
+    throws InterruptedException {
+    if (Thread.interrupted())
+      throw new InterruptedException();
+        // 尝试获取许可证，arg为获取许可证个数，当可用许可证数减当前获取的许可证数结果小于0,则创建一个节点加入阻塞队列，挂起当前线程。
+    if (tryAcquireShared(arg) < 0)
+      doAcquireSharedInterruptibly(arg);
+}
+```
+
+调用`semaphore.release();` ，线程尝试释放许可证，并使用 CAS 操作去修改 `state` 的值 `state=state+1`。释放许可证成功之后，同时会唤醒同步队列中的一个线程。被唤醒的线程会重新尝试去修改 `state` 的值 `state=state-1` ，如果 `state>=0` 则获取令牌成功，否则重新进入阻塞队列，挂起线程。
+
+```java
+// 释放一个许可证
+public void release() {
+    sync.releaseShared(1);
+}
+
+// 释放共享锁，同时会唤醒同步队列中的一个线程。
+public final boolean releaseShared(int arg) {
+    //释放共享锁
+    if (tryReleaseShared(arg)) {
+      //唤醒同步队列中的一个线程
+      doReleaseShared();
+      return true;
+    }
+    return false;
+}
+```
+
+## 5、Semaphore 和 CountDownLatch  区别
+
+### 🧠5.1、本质区别
+
+- **Semaphore**：控制“**同时**能执行多少线程”（限流/资源控制）
+- **CountDownLatch** ：控制“什么时候一起 **继续执行”**（同步/协调）
+
+### 🔍5.2、核心对比（非常重要）
+
+| 维度           | Semaphore      | CountDownLatch   |
+| -------------- | -------------- | ---------------- |
+| 本质           | 资源许可（锁） | 计数器（同步器） |
+| state 含义     | 剩余许可证     | 剩余计数         |
+| 是否可获取资源 | ✅ acquire      | ❌ 没有           |
+| 是否释放资源   | ✅ release      | ❌ 只能 countDown |
+| 是否可复用     | ✅ 可以反复用   | ❌ 一次性         |
+| 线程关系       | 竞争关系       | 协作关系         |
+
+### 🧪5.3、 用代码看本质差异
+
+✅ 1️⃣ Semaphore：控制并发数（像“限流闸门”）
+
+```java
+import java.util.concurrent.Semaphore;
+
+public class SemaphoreDemo {
+
+    public static void main(String[] args) {
+
+        Semaphore semaphore = new Semaphore(2); // 2个许可证
+
+        for (int i = 1; i <= 5; i++) {
+            int taskId = i;
+
+            new Thread(() -> {
+                try {
+                    semaphore.acquire(); // 获取许可
+                    System.out.println("任务" + taskId + "开始执行");
+
+                    Thread.sleep(2000);
+
+                    System.out.println("任务" + taskId + "执行结束");
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } finally {
+                    semaphore.release(); // 归还许可
+                }
+            }).start();
+        }
+    }
+}
+```
+
+🔍 执行效果
+
+```java
+最多只有 2 个线程同时运行
+```
+
+👉 本质：
+
+```
+抢许可 → 执行 → 归还 → 下一个再进
+```
+
+
+
+✅ 2️⃣ CountDownLatch：等待全部完成（像“集合点”）
+
+```java
+import java.util.concurrent.CountDownLatch;
+
+public class CountDownLatchDemo2 {
+
+    public static void main(String[] args) throws InterruptedException {
+
+        CountDownLatch latch = new CountDownLatch(3);
+
+        for (int i = 1; i <= 3; i++) {
+            int taskId = i;
+
+            new Thread(() -> {
+                System.out.println("任务" + taskId + "执行中...");
+
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+
+                System.out.println("任务" + taskId + "完成");
+                latch.countDown(); // 减1
+            }).start();
+        }
+
+        System.out.println("主线程等待...");
+        latch.await(); // 等待所有完成
+        System.out.println("全部任务完成，主线程继续");
+    }
+}
+```
+
+🔍 执行效果
+
+```
+主线程卡住 → 等所有任务完成 → 再继续
+```
+
+👉 本质：
+
+```java
+不是抢资源，而是“等别人完成”
+```
+
+
+
+### 🧠 5.4、从 AQS 的 state 角度理解
+
+- `Semaphore` 
+
+  ```
+  state = 剩余许可证
+  ```
+
+  - acquire → state - 1
+  - release → state + 1
+
+  👉 **可增可减（循环使用）**
+
+- `CountDownLatch`
+
+  ```
+  state = 剩余计数
+  ```
+
+  - countDown → state - 1
+  - 到 0 → 唤醒线程
+
+  👉 **只能减，不能加（一次性）**
+
+## 6、CountDownLatch 有什么用？
+
+`CountDownLatch` 允许 `count` 个线程阻塞在一个地方，直至所有线程的任务都执行完毕。
+
+`CountDownLatch` 是一次性的，计数器的值只能在构造方法中初始化一次，之后没有任何机制再次对其设置值，当 `CountDownLatch` 使用完毕后，它不能再次被使用。
+
+## 7、CountDownLatch 的原理是什么？
+
+`CountDownLatch` 是共享锁的一种实现,它默认构造 AQS 的 `state` 值为 `count`。当线程使用 `countDown()` 方法时,其实使用了`tryReleaseShared`方法以 CAS 的操作来减少 `state`,直至 `state` 为 0 。当调用 `await()` 方法的时候，如果 `state` 不为 0，那就证明任务还没有执行完毕，`await()` 方法就会一直阻塞，也就是说 `await()` 方法之后的语句不会被执行。直到`count` 个线程调用了`countDown()`使 state 值被减为 0，或者调用`await()`的线程被中断，该线程才会从阻塞中被唤醒，`await()` 方法之后的语句得到执行。
+
+## 8、用过 CountDownLatch 么？什么场景下用的？
+
+`CountDownLatch` 的作用就是 允许 count 个线程阻塞在一个地方，直至所有线程的任务都执行完毕。之前在项目中，有一个使用多线程读取多个文件处理的场景，我用到了 `CountDownLatch` 。具体场景是下面这样的：
+
+我们要读取处理 6 个文件，这 6 个任务都是没有执行顺序依赖的任务，但是我们需要返回给用户的时候将这几个文件的处理的结果进行统计整理。
+
+为此我们定义了一个线程池和 count 为 6 的`CountDownLatch`对象 。使用线程池处理读取任务，每一个线程处理完之后就将 count-1，调用`CountDownLatch`对象的 `await()`方法，直到所有文件读取完之后，才会接着执行后面的逻辑。
+
+伪代码是下面这样的：
+
+```java
+public class CountDownLatchExample1 {
+    // 处理文件的数量
+    private static final int threadCount = 6;
+
+    public static void main(String[] args) throws InterruptedException {
+        // 创建一个具有固定线程数量的线程池对象（推荐使用构造方法创建）
+        ExecutorService threadPool = Executors.newFixedThreadPool(10);
+        final CountDownLatch countDownLatch = new CountDownLatch(threadCount);
+        for (int i = 0; i < threadCount; i++) {
+            final int threadnum = i;
+            threadPool.execute(() -> {
+                try {
+                    //处理文件的业务操作
+                    //......
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } finally {
+                    //表示一个文件已经被完成
+                    countDownLatch.countDown();
+                }
+
+            });
+        }
+        countDownLatch.await();
+        threadPool.shutdown();
+        System.out.println("finish");
+    }
+}
+```
+
+**有没有可以改进的地方呢？**
+
+可以使用 `CompletableFuture` 类来改进！Java8 的 `CompletableFuture` 提供了很多对多线程友好的方法，使用它可以很方便地为我们编写多线程程序，什么异步、串行、并行或者等待所有线程执行完任务什么的都非常方便。
+
+```java
+CompletableFuture<Void> task1 =
+    CompletableFuture.supplyAsync(()->{
+        //自定义业务操作
+    });
+......
+CompletableFuture<Void> task6 =
+    CompletableFuture.supplyAsync(()->{
+    //自定义业务操作
+    });
+......
+CompletableFuture<Void> headerFuture=CompletableFuture.allOf(task1,.....,task6);
+
+try {
+    headerFuture.join();
+} catch (Exception ex) {
+    //......
+}
+System.out.println("all done. ");
+```
+
+上面的代码还可以继续优化，当任务过多的时候，把每一个 task 都列出来不太现实，可以考虑通过循环来添加任务。
+
+```java
+//文件夹位置
+List<String> filePaths = Arrays.asList(...)
+// 异步处理所有文件
+List<CompletableFuture<String>> fileFutures = filePaths.stream()
+    .map(filePath -> doSomeThing(filePath))
+    .collect(Collectors.toList());
+// 将他们合并起来
+CompletableFuture<Void> allFutures = CompletableFuture.allOf(
+    fileFutures.toArray(new CompletableFuture[fileFutures.size()])
+);
+```
+
+## 9、CyclicBarrier 有什么用？
+
+`CyclicBarrier` 和 `CountDownLatch` 非常类似，它也可以实现线程间的技术等待，但是它的功能比 `CountDownLatch` 更加复杂和强大。主要应用场景和 `CountDownLatch` 类似。
+
+> `CountDownLatch` 的实现是基于 AQS 的，而 `CyclicBarrier` 是基于 `ReentrantLock`(`ReentrantLock` 也属于 AQS 同步器)和 `Condition` 的。
+
+`CyclicBarrier` 的字面意思是可循环使用（Cyclic）的屏障（Barrier）。它要做的事情是：让一组线程到达一个屏障（也可以叫同步点）时被阻塞，直到最后一个线程到达屏障时，屏障才会开门，所有被屏障拦截的线程才会继续干活。
+
+> ### 🧪 示例一：最典型用法（所有线程到齐再一起继续）
+>
+> ```java
+> import java.util.concurrent.CyclicBarrier;
+> 
+> public class CyclicBarrierDemo1 {
+> 
+>     public static void main(String[] args) {
+> 
+>         int parties = 3;
+> 
+>         CyclicBarrier barrier = new CyclicBarrier(parties, () -> {
+>             System.out.println(">>> 所有线程已到达屏障，开始统一执行下一阶段");
+>         });
+> 
+>         for (int i = 1; i <= parties; i++) {
+>             int id = i;
+>             new Thread(() -> {
+>                 try {
+>                     System.out.println("线程" + id + " 执行第一阶段任务...");
+>                     Thread.sleep(1000 * id); // 模拟耗时
+> 
+>                     System.out.println("线程" + id + " 到达屏障，等待其他线程...");
+>                     barrier.await(); // 等待其他线程
+> 
+>                     System.out.println("线程" + id + " 开始执行第二阶段任务...");
+>                 } catch (Exception e) {
+>                     e.printStackTrace();
+>                 }
+>             }).start();
+>         }
+>     }
+> }
+> ```
+>
+> 🔍 执行流程
+>
+> ```
+> 线程1执行第一阶段...
+> 线程2执行第一阶段...
+> 线程3执行第一阶段...
+> 
+> 线程1到达屏障（等待）
+> 线程2到达屏障（等待）
+> 线程3到达屏障（最后一个）
+> 
+> 👉 触发 barrierAction（可选）
+> 👉 唤醒所有线程
+> 
+> 线程1/2/3 一起继续执行第二阶段
+> ```
+>
+> 🧠 核心点解释
+>
+>  1️⃣ `new CyclicBarrier(parties, barrierAction)`
+>
+> - `parties`：需要等待的线程数量
+> - `barrierAction`：最后一个线程到达时执行（可选）
+>
+> 2️⃣ `await()`
+>
+> ```
+> 没到齐 → 阻塞  
+> 到齐 → 全部唤醒（同时继续）
+> ```
+>
+> ### 🔁 示例二：体现“Cyclic（可复用）”
+>
+> 👉 同一批线程**可以多次使用同一个屏障**
+>
+> ```java
+> import java.util.concurrent.CyclicBarrier;
+> 
+> public class CyclicBarrierDemo2 {
+> 
+>     public static void main(String[] args) {
+> 
+>         CyclicBarrier barrier = new CyclicBarrier(2, () ->
+>                 System.out.println(">>> 两个线程已汇合，进入下一轮\n")
+>         );
+> 
+>         Runnable task = () -> {
+>             try {
+>                 for (int round = 1; round <= 2; round++) {
+> 
+>                     System.out.println(Thread.currentThread().getName() +
+>                             " 第" + round + "轮开始");
+> 
+>                     Thread.sleep(1000);
+> 
+>                     System.out.println(Thread.currentThread().getName() +
+>                             " 到达屏障");
+>                     barrier.await(); // 每一轮都要等待
+> 
+>                 }
+>             } catch (Exception e) {
+>                 e.printStackTrace();
+>             }
+>         };
+> 
+>         new Thread(task, "线程A").start();
+>         new Thread(task, "线程B").start();
+>     }
+> }
+> ```
+>
+> 🔍 关键现象
+>
+> ```
+> 第1轮 → 等待 → 同时继续  
+> 第2轮 → 再次等待 → 再次同时继续
+> ```
+>
+> 👉 **同一个 barrier 被重复使用 ✔**
+>
+> ### ⚠️ 示例三：异常情况（屏障被打破）
+>
+> ```java
+> import java.util.concurrent.CyclicBarrier;
+> 
+> public class CyclicBarrierDemo3 {
+> 
+>     public static void main(String[] args) {
+> 
+>         CyclicBarrier barrier = new CyclicBarrier(2);
+> 
+>         new Thread(() -> {
+>             try {
+>                 System.out.println("线程A等待...");
+>                 barrier.await();
+>                 System.out.println("线程A继续执行");
+>             } catch (Exception e) {
+>                 System.out.println("线程A异常：" + e);
+>             }
+>         }).start();
+> 
+>         new Thread(() -> {
+>             try {
+>                 System.out.println("线程B等待...");
+>                 Thread.sleep(1000);
+>                 barrier.reset(); // 强制打破屏障
+>             } catch (Exception e) {
+>                 e.printStackTrace();
+>             }
+>         }).start();
+>     }
+> }
+> ```
+>
+> 🔍 结果
+>
+> ```
+> 线程A等待...
+> 线程B等待...
+> 线程A异常：BrokenBarrierException
+> ```
+>
+> 👉 **屏障被打破，等待线程全部异常退出**
+>
+> ### 🧠 和 CountDownLatch 的核心区别
+>
+> | 对比             | CyclicBarrier   | CountDownLatch |
+> | ---------------- | --------------- | -------------- |
+> | 是否可复用       | ✅ 可以          | ❌ 一次性       |
+> | 线程关系         | 相互等待        | 主线程等子线程 |
+> | 是否有“最后动作” | ✅ barrierAction | ❌ 没有         |
+> | 是否能重置       | ✅ reset()       | ❌ 不行         |
+>
+> ### 🎯 一句话理解
+>
+> 👉
+>
+> - **CyclicBarrier：大家互相等，一起走（可反复用）**
+> - **CountDownLatch：你们干完，我再走（一次性）**
+>
+> ### 🚀 什么时候用？
+>
+> ✔ 用 CyclicBarrier
+>
+> - 多线程分阶段计算（如并行算法）
+> - 游戏同步（所有玩家准备完再开始）
+> - 批处理流水线（分阶段执行）
+>
+> ------
+>
+> ✔ 用 CountDownLatch
+>
+> - 主线程等待多个子任务完成
+> - 服务启动初始化
+> - 并发测试（同时起跑）
+
+## 10、CyclicBarrier 的原理是什么？
+
+`CyclicBarrier` 内部通过一个 `count` 变量作为计数器，`count` 的初始值为 `parties` 属性的初始化值，每当一个线程到了栅栏这里了，那么就将计数器减 1。如果 count 值为 0 了，表示这是这一代最后一个线程到达栅栏，就尝试执行我们构造方法中输入的任务。
+
+```java
+//每次拦截的线程数
+private final int parties;
+//计数器
+private int count;
+```
+
+下面我们结合源码来简单看看。
+
+1、`CyclicBarrier` 默认的构造方法是 `CyclicBarrier(int parties)`，其参数表示屏障拦截的线程数量，每个线程调用 `await()` 方法告诉 `CyclicBarrier` 我已经到达了屏障，然后当前线程被阻塞。
+
+```java
+public CyclicBarrier(int parties) {
+    this(parties, null);
+}
+
+public CyclicBarrier(int parties, Runnable barrierAction) {
+    if (parties <= 0) throw new IllegalArgumentException();
+    this.parties = parties;
+    this.count = parties;
+    this.barrierCommand = barrierAction;
+}
+```
+
+其中，`parties` 就代表了有拦截的线程的数量，当拦截的线程数量达到这个值的时候就打开栅栏，让所有线程通过。
+
+2、当调用 `CyclicBarrier` 对象调用 `await()` 方法时，实际上调用的是 `dowait(false, 0L)`方法。 `await()` 方法就像树立起一个栅栏的行为一样，将线程挡住了，当拦住的线程数量达到 `parties` 的值时，栅栏才会打开，线程才得以通过执行。
+
+```java
+public int await() throws InterruptedException, BrokenBarrierException {
+  try {
+      return dowait(false, 0L);
+  } catch (TimeoutException toe) {
+      throw new Error(toe); // cannot happen
+  }
+}
+```
+
+`dowait(false, 0L)`方法源码分析如下：
+
+```java
+    // 当线程数量或者请求数量达到 count 时 await 之后的方法才会被执行。上面的示例中 count 的值就为 5。
+    private int count;
+    /**
+     * Main barrier code, covering the various policies.
+     */
+    private int dowait(boolean timed, long nanos)
+        throws InterruptedException, BrokenBarrierException,
+               TimeoutException {
+        final ReentrantLock lock = this.lock;
+        // 锁住
+        lock.lock();
+        try {
+            final Generation g = generation;
+
+            if (g.broken)
+                throw new BrokenBarrierException();
+
+            // 如果线程中断了，抛出异常
+            if (Thread.interrupted()) {
+                breakBarrier();
+                throw new InterruptedException();
+            }
+            // cout减1
+            int index = --count;
+            // 当 count 数量减为 0 之后说明最后一个线程已经到达栅栏了，也就是达到了可以执行await 方法之后的条件
+            if (index == 0) {  // tripped
+                boolean ranAction = false;
+                try {
+                    final Runnable command = barrierCommand;
+                    if (command != null)
+                        command.run();
+                    ranAction = true;
+                    // 将 count 重置为 parties 属性的初始化值
+                    // 唤醒之前等待的线程
+                    // 下一波执行开始
+                    nextGeneration();
+                    return 0;
+                } finally {
+                    if (!ranAction)
+                        breakBarrier();
+                }
+            }
+
+            // loop until tripped, broken, interrupted, or timed out
+            for (;;) {
+                try {
+                    if (!timed)
+                        trip.await();
+                    else if (nanos > 0L)
+                        nanos = trip.awaitNanos(nanos);
+                } catch (InterruptedException ie) {
+                    if (g == generation && ! g.broken) {
+                        breakBarrier();
+                        throw ie;
+                    } else {
+                        // We're about to finish waiting even if we had not
+                        // been interrupted, so this interrupt is deemed to
+                        // "belong" to subsequent execution.
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                if (g.broken)
+                    throw new BrokenBarrierException();
+
+                if (g != generation)
+                    return index;
+
+                if (timed && nanos <= 0L) {
+                    breakBarrier();
+                    throw new TimeoutException();
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+```
+
+# 五、虚拟线程
+
+虚拟线程在 Java 21 正式发布，这是一项重量级的更新。虽然目前面试中问的不多，但还是建议大家去简单了解一下。我写了一篇文章来总结虚拟线程常见的问题：[虚拟线程常见问题总结](./★重要知识点\11_虚拟线程常见问题总结.md)，包含下面这些问题：
+
+1. 什么是虚拟线程？
+2. 虚拟线程和平台线程有什么关系？
+3. 虚拟线程有什么优点和缺点？
+4. 如何创建虚拟线程？
+5. 虚拟线程的底层原理是什么？
