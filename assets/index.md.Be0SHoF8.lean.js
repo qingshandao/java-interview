@@ -1,1 +1,0 @@
-import{_ as e,o as t,c as r,ag as i}from"./chunks/framework.C9sp7nFj.js";const m=JSON.parse('{"title":"我的技术文档","description":"","frontmatter":{},"headers":[],"relativePath":"index.md","filePath":"index.md"}'),n={name:"index.md"};function o(l,a,_,d,s,c){return t(),r("div",null,[...a[0]||(a[0]=[i("",3)])])}const f=e(n,[["render",o]]);export{m as __pageData,f as default};
