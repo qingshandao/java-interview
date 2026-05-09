@@ -1,11 +1,11 @@
 import { defineConfig } from 'vitepress'
-import { generateSidebar } from 'vitepress-sidebar'
+import { generateSidebar } from 'vitepress-sidebar'   // 引入自动生成侧栏
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "Java 面试文档",
-  description: "a java-docs",
-  ignoreDeadLinks: true,  // 忽略无效链接
+  title: "a java note",
+  description: "java",
+  ignoreDeadLinks: true,  // 关闭死链检查
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
@@ -13,21 +13,15 @@ export default defineConfig({
       { text: 'Examples', link: '/markdown-examples' }
     ],
 
-    // sidebar: [
-    //   {
-    //     text: 'Examples',
-    //     items: [
-    //       { text: 'Markdown Examples', link: '/markdown-examples' },
-    //       { text: 'Runtime API Examples', link: '/api-examples' }
-    //     ]
-    //   }
-    // ],
-    sidebar: generateSidebar(),
+    sidebar: generateSidebar({
+      documentRootPath: 'docs',
+    }),
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/vuejs/vitepress' }
     ],
 
+    // 开启搜索
     search: {
       provider: 'local'
     }
