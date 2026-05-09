@@ -178,7 +178,7 @@ Java 的泛型是 **伪泛型**，这是因为 Java 在编译期间，**所有�
   }
   ```
 
-  ⚠⚠也就是说，泛型类型参数<T> 被直接擦除，泛型变量 `T` 则被改为 `Object`
+  ⚠⚠也就是说，泛型类型参数`<T>`  被直接擦除，泛型变量 `T` 则被改为 `Object`
 
   
 
@@ -829,7 +829,7 @@ ChildNode<Circle> nc = new ChildNode<>();
 Node<Circle>  ns = nc;
 ```
 
-✅ 可以编译，ChildNode<Circle> 是 Node<Circle> 的子类
+✅ 可以编译，ChildNode`<Circle>` 是 Node`<Circle>` 的子类
 
 ```java
 public static void print(List<? extends Number> list) {
@@ -839,4 +839,4 @@ public static void print(List<? extends Number> list) {
 }
 ```
 
-✅可以编译，List<? extends Number> 可以往外取元素，但是无法调用 add() 添加元素。
+✅可以编译，`List<? extends Number>` 可以往外取元素，但是无法调用 add() 添加元素。
