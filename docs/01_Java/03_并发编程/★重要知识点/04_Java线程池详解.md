@@ -1122,17 +1122,21 @@ Finished all threads  // 任务全部执行完了才会跳出来，因为executo
 
 `execute()` 和 `submit()`是两种提交任务到线程池的方法，有一些区别：
 
-- **返回值**：`execute()` 方法用于提交不需要返回值的任务。通常用于执行 `Runnable` 任务，无法判断任务是否被线程池成功执行。`submit()` 方法用于提交需要返回值的任务。可以提交 `Runnable` 或 `Callable` 任务。`submit()` 方法返回一个 `Future` 对象，通过这个 `Future` 对象可以判断任务是否执行成功，并获取任务的返回值（`get()`方法会阻塞当前线程直到任务完成， `get（long timeout，TimeUnit unit）`多了一个超时时间，如果在 `timeout` 时间内任务还没有执行完，就会抛出 `java.util.concurrent.TimeoutException`）。
-- **异常处理**：在使用 `submit()` 方法时，可以通过 `Future` 对象处理任务执行过程中抛出的异常；而在使用 `execute()` 方法时，异常处理需要通过自定义的 `ThreadFactory` （在线程工厂创建线程的时候设置`UncaughtExceptionHandler`对象来 处理异常）或 `ThreadPoolExecutor` 的 `afterExecute()` 方法来处理。
+- **返回值**：
+	- `execute()` 方法用于提交不需要返回值的任务。通常用于执行 `Runnable` 任务，无法判断任务是否被线程池成功执
+	- `submit()` 方法用于提交需要返回值的任务。可以提交 `Runnable` 或 `Callable` 任务。`submit()` 方法返回一个 `Future` 对象，通过这个 `Future` 对象可以判断任务是否执行成功，并获取任务的返回值（`get()`方法会阻塞当前线程直到任务完成， `get（long timeout，TimeUnit unit）`多了一个超时时间，如果在 `timeout` 时间内任务还没有执行完，就会抛出 `java.util.concurrent.TimeoutException`）。
+- **异常处理**：
+	- 在使用 `submit()` 方法时，可以通过 `Future` 对象处理任务执行过程中抛出的异常；
+	- 而在使用 `execute()` 方法时，异常处理需要通过自定义的 `ThreadFactory` （在线程工厂创建线程的时候设置`UncaughtExceptionHandler`对象来 处理异常）或 `ThreadPoolExecutor` 的 `afterExecute()` 方法来处理。
 
 | 方法        | 是否能获取结果  | 异常传播方式               |
 | ----------- | --------------- | -------------------------- |
 | `execute()` | ❌ 不返回结果    | 异常直接抛给工作线程       |
 | `submit()`  | ✅ 返回 `Future` | 异常会被包装到 `Future` 中 |
 
-> ### 一、二者返回值对比
+> ### 一、两个返回方法的对比
 >
-> **示例 1：使用 `get()`方法获取返回值**。
+> **示例 1：使用 `FUture.get()`方法获取返回值**。
 >
 > ```java
 > // 这里只是为了演示使用，推荐使用 `ThreadPoolExecutor` 构造方法来创建线程池。
@@ -1158,7 +1162,7 @@ Finished all threads  // 任务全部执行完了才会跳出来，因为executo
 > abc
 > ```
 >
-> **示例 2：使用 `get（long timeout，TimeUnit unit）`方法获取返回值。**
+> **示例 2：使用 `Future.get（long timeout，TimeUnit unit）`方法获取返回值。**
 >
 > ```java
 > ExecutorService executorService = Executors.newFixedThreadPool(3);
@@ -1265,7 +1269,7 @@ Finished all threads  // 任务全部执行完了才会跳出来，因为executo
 >
 > #### 4、execute() 的异常处理
 >
-> `execute()` 不会包装 FutureTask，因此异常会直接抛到工作线程，异常会直接抛到工作线程，控制台直接打印异常堆栈
+> `execute()` 不会包装 FutureTask，因此异常会直接抛到**工作线程**，控制台直接打印异常堆栈。
 >
 > #### 5、execute() 示例
 >
@@ -1370,7 +1374,7 @@ Finished all threads  // 任务全部执行完了才会跳出来，因为executo
 >
 > #### 8、方式2：ThreadPoolExecutor.afterExecute()
 >
-> 这是 线程池级别 的统一异常处理。
+> 这是 **线程池级别** 的统一异常处理。
 >
 > 很多中间件：
 >
@@ -1435,4 +1439,36 @@ Finished all threads  // 任务全部执行完了才会跳出来，因为executo
 > ```
 >
 > 
+
+### 3.3、`shutdown()` VS `shutdownNow()`
+
+- **`shutdown（）`** ：关闭线程池，线程池的状态变为 `SHUTDOWN`。线程池不再接受新任务了，但是队列里的任务得执行完毕。
+
+- **`shutdownNow（）`** ：关闭线程池，线程池的状态变为 `STOP`。线程池会终止当前正在运行的任务，并停止处理排队的任务并返回正在等待执行的 List。
+
+### 3.4、`isTerminated()`  VS `isShutdown()`
+
+- **`isShutDown`** 当调用 `shutdown()` 方法后返回为 true。
+- **`isTerminated`** 当调用 `shutdown()` 方法后，并且所有提交的任务完成后返回为 true。
+
+# 五、几种常见的内置线程池
+## 1、FixedThreadPool
+
+### 1.1、介绍
+
+`FixedThreadPool` 被称为可重用固定线程数的线程池。通过 `Executors` 类中的相关源代码来看一下相关实现：
+
+```java
+   /**
+     * 创建一个可重用固定数量线程的线程池
+     */
+    public static ExecutorService newFixedThreadPool(int nThreads, ThreadFactory threadFactory) {
+        return new ThreadPoolExecutor(nThreads, nThreads,
+                                      0L, TimeUnit.MILLISECONDS,
+                                      new LinkedBlockingQueue<Runnable>(),
+                                      threadFactory);
+    }
+```
+
+
 
