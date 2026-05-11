@@ -6,6 +6,8 @@
 npm add -D vitepress
 ```
 
+> 注意：需要 Node 18 及以上的版本，当前使用的是 `Node 18.20.8` 版本
+
 # 2、初始化
 
 ```java
