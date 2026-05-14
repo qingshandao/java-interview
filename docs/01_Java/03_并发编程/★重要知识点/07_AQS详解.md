@@ -798,8 +798,14 @@ AQS 中以独占模式获取资源的入口方法是 `acquire()` ，如下：
 ```java
 // AQS
 public final void acquire(int arg) {
-    if (!tryAcquire(arg) &&
-        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+
+    // 1. 先尝试获取锁
+    if (!tryAcquire(arg)
+
+        // 2. 获取失败后进入队列
+        && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+
+        // 3. 如果等待期间被中断
         selfInterrupt();
 }
 ```
@@ -929,10 +935,16 @@ private Node enq(final Node node) {
 
 为了方便阅读，这里再贴一下 `AQS` 中 `acquire()` 获取资源的代码：
 
-```java// AQS
+```java
 public final void acquire(int arg) {
-    if (!tryAcquire(arg) &&
-        acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+
+    // 1. 先尝试获取锁
+    if (!tryAcquire(arg)
+
+        // 2. 获取失败后进入队列
+        && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+
+        // 3. 如果等待期间被中断
         selfInterrupt();
 }
 ```
@@ -945,11 +957,13 @@ final boolean acquireQueued(final Node node, int arg) {
     boolean failed = true;
     try {
         boolean interrupted = false;
+        // 自旋等待
         for (;;) {
             // 1、尝试获取锁。
             final Node p = node.predecessor();
             // 1.1 如果是第一个等待节点，那么尝试获取资源
             if (p == head && tryAcquire(arg)) {
+                // 获取锁成功
                 setHead(node);
                 p.next = null; // help GC
                 failed = false;
@@ -1020,22 +1034,27 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
 ```java
 // AQS
 private final boolean parkAndCheckInterrupt() {
-    // 1、线程阻塞到这里
+    // 1、线程阻塞到这里，阻塞（挂起）当前线程
+    // LockSupport.park()的设计里，有一个非常重要的规则：如果线程的中断标记已经是 true，那么 park 不会阻塞，而是直接返回。
     LockSupport.park(this);
-    // 2、线程被唤醒之后，返回线程中断状态
+    // 2、线程被唤醒之后，读取（消费）线程中断状态，清除中断被读取，中断信号就消失了
     return Thread.interrupted();
 }
 ```
 
+其中的 `park()` 的设计里，有一个非常重要的规则：如果线程的中断标记已经是 true，那么 park 不会阻塞，而是直接返回。
+
 **为什么在线程被唤醒之后，要返回线程的中断状态呢？**
 
-在 `parkAndCheckInterrupt()` 方法中，当执行完 `LockSupport.park(this)` ，线程会被阻塞，代码如下：
+在 `parkAndCheckInterrupt()` 方法中，当执行完 `LockSupport.park(this)` ，当前线程会被阻塞，代码如下：
 
 ```java
 // AQS
 private final boolean parkAndCheckInterrupt() {
+    // 1、线程阻塞到这里，阻塞（挂起）当前线程
+    // LockSupport.park()的设计里，有一个非常重要的规则：如果线程的中断标记已经是 true，那么 park 不会阻塞，而是直接返回。
     LockSupport.park(this);
-    // 线程被唤醒之后，需要返回线程中断状态
+    // 2、线程被唤醒之后，读取（消费）线程中断状态，清除中断被读取，中断信号就消失了
     return Thread.interrupted();
 }
 ```
@@ -1043,6 +1062,8 @@ private final boolean parkAndCheckInterrupt() {
 当线程被唤醒之后，需要执行 `Thread.interrupted()` 来返回线程的中断状态，这是为什么呢？
 
 这个和线程的中断协作机制有关系，线程被唤醒之后，并不确定是被中断唤醒，还是被 `LockSupport.unpark()` 唤醒，因此需要通过线程的中断状态来判断。
+
+Java 把中断设计成“协作机制”，即线程自己决定“我是否处理中断”，而`Thread.interrupted()`表示：“我已经收到并处理中断通知了”，既然已经处理，中断标记就应该清除，否则后面永远都是 `true`，系统无法区分“新的中断”还是“旧的中断”
 
 > `LockSupport.unpark(thread)` 是 AQS 正常的线程调度机制，意思是恢复指定线程运行，例如：`ReentrantLock unlock()` 内部会 unpark 后继节点
 
@@ -1087,8 +1108,6 @@ selfInterrupt()
 恢复中断标记
 ```
 
-
-
 **interrupt 后还能不能 park？**
 
 可以，但必须先清除中断标记，否则后续 park 会立即返回，后续 park 会立即返回
@@ -1100,4 +1119,151 @@ selfInterrupt()
 **在 `acquire()` 方法中，为什么需要调用 `selfInterrupt()` ？**
 
 `acquire()` 方法代码如下：
+
+```java
+// AQS
+public final void acquire(int arg) {
+
+    // 1. 先尝试获取锁
+    if (!tryAcquire(arg)
+
+        // 2. 获取失败后进入队列
+        && acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+
+        // 3. 如果获取锁失败，且等待期间被中断
+        selfInterrupt();
+}
+```
+
+在 `acquire()` 方法中，当 `if` 语句的条件返回 `true` 后，就会调用 `selfInterrupt()` ，该方法会中断当前线程，为什么需要中断当前线程呢？
+
+当 `if` 判断为 `true` 时，需要 `tryAcquire()` 返回 `false` ，并且 `acquireQueued()` 返回 `true` 。
+
+其中 `acquireQueued()` 方法返回的是线程被唤醒之后的 **中断状态** ，通过执行 `Thread.interrupted()` 来返回。该方法在返回中断状态的同时，会清除线程的中断状态。
+
+因此如果 `if` 判断为 `true` ，表明线程的中断状态为 `true` ，但是调用 `Thread.interrupted()` 之后，线程的中断状态被清除为 `false` ，因此需要重新执行 `selfInterrupt()` 来重新设置线程的中断状态。
+
+### 6.4、`selfInterrupt()`
+
+能调用 `selfInterrupt` 说明if 条件为 true ：
+
+- `!tryAcquire(arg)` 
+
+  表示第一次抢锁失败，即锁已经被别的线程持有，所以当前线程进入 AQS 队列排队
+
+- ` acquireQueued(...) == true`
+
+  它的意思不是“获取锁成功”，而是“线程在等待过程中被 interrupt 过”
+
+每个线程内部都有一个 interrupt 标记，`selfInterrupt()` 方法再次将该状态置为 `true` 。
+
+**为什么吞掉中断很危险？**
+
+因为很多上层框架依赖 `interrupt`  做线程协作，例如：
+
+- 线程池关闭
+- Future.cancel()
+- 超时控制
+- Spring shutdown
+- Tomcat 停机
+- MQ 消费停止
+
+这些本质都依赖：`interrupt` 信号，因此AQS 的思想：
+
+```
+“我内部需要临时清除 interrupt，
+但我不会替你决定如何处理中断”
+```
+
+最后把 interrupt 状态还给你，`selfInterrupt()`。
+
+### 6.5、完整流程
+
+**✔ AQS acquire 本质流程**
+
+```java
+1. 先抢锁（tryAcquire）
+2. 抢不到 → 入队（CLH队列）
+3. 自旋等待（acquireQueued）
+4. 只有队头线程才竞争锁
+5. 竞争失败 → park 阻塞
+6. park 返回原因：
+   - unpark
+   - interrupt
+7. interrupt 会被“消费”（清除标记）
+8. acquireQueued 记录是否被中断过
+9. 最终拿到锁后返回
+10. 如果曾被中断 → selfInterrupt 恢复中断标记
+```
+
+**✔完整流程图（AQS acquire）**
+
+```
+acquire(arg)
+   │
+   ├── tryAcquire(arg)
+   │        │
+   │        ├── 成功 → 结束
+   │        │
+   │        └── 失败
+   │
+   ├── addWaiter(Node)
+   │        ↓
+   │   加入CLH队列
+   │
+   └── acquireQueued(node)
+            │
+            ┌─────────────────────────────┐
+            │ for (;;)                                 │
+            │                                       │
+            │  if (node.prev == head)                       │
+            │       tryAcquire                          │
+            │          │                             │
+            │          ├── 成功 → setHead → return interrupted
+            │          │
+            │          └── 失败   │
+            │                    │
+            │  shouldParkAfterFailedAcquire
+            │          │
+            │          ├── 处理 CANCELLED
+            │          └── 设置 SIGNAL
+            │
+            │  parkAndCheckInterrupt()
+            │          │
+            │          ├── LockSupport.park()
+            │          └── Thread.interrupted()
+            │
+            │          → interrupted=true/false
+            │
+            │  interrupted |= true
+            └─────────────────────────────┘
+                     ↓
+          acquireQueued 返回 interrupted
+                     ↓
+        if (interrupted == true)
+                selfInterrupt()
+                     ↓
+        恢复 Thread interrupt 状态
+```
+
+## 7、AQS 资源释放源码分析（独占模式）
+
+AQS 中以独占模式释放资源的入口方法是 `release()` ，代码如下：
+
+```java
+// AQS
+public final boolean release(int arg) {
+    // 1、尝试释放锁
+    if (tryRelease(arg)) {
+        Node h = head;
+        // 2、唤醒后继节点
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
+}
+```
+
+在 `release()` 方法中，主要做两件事：尝试释放锁和唤醒后继节点。对应方法如下：
 
