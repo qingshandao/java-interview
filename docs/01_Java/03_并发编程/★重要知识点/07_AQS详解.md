@@ -23,7 +23,7 @@ AQS 为构建锁和同步器提供了一些通用功能的实现。因此，使�
 
 ### 1.1、AQS 的作用是什么？
 
-AQS 解决了开发者在实现同步器时的复杂性问题。它提供了一个通用框架，用于实现各种同步器，例如 **可重入锁**（`ReentrantLock`）、**信号量**（`Semaphore`）和 **倒计时器**（`CountDownLatch`）。通过封装底层的线程同步机制，AQS 将复杂的线程管理逻辑隐藏起来，使开发者只需专注于具体的同步逻辑。
+AQS 解决了开发者在实现同步器时的复杂性问题。它提供了一个通用框架，用于实现各种**同步器**，例如 **可重入锁**（`ReentrantLock`）、**信号量**（`Semaphore`）和 **倒计时器**（`CountDownLatch`）。通过封装底层的线程同步机制，AQS 将复杂的线程管理逻辑隐藏起来，使开发者只需专注于具体的同步逻辑。
 
 简单来说，AQS 是一个抽象类，为同步器提供了通用的 **执行框架**。它定义了 **资源获取和释放的通用流程**，而具体的资源获取逻辑则由具体同步器通过重写模板方法来实现。 因此，可以将 AQS 看作是同步器的 **基础“底座”**，而同步器则是基于 AQS 实现的 **具体“应用”**。
 
@@ -398,7 +398,7 @@ AQS 中的 `waitStatus` 状态类似于 **状态机** ，通过不同状态来�
 | `CANCELLED`   | 1    | 表示线程已经**取消获取锁**。线程在等待获取资源时被中断、等待资源超时会更新为该状态。 |
 | `SIGNAL`      | -1   | 表示后继节点需要当前节点唤醒。在当前线程节点释放锁之后，需要对后继节点进行唤醒。 |
 | `CONDITION`   | -2   | 表示节点在等待 Condition。当其他线程调用了 Condition 的 `signal()` 方法后，节点会从等待队列转移到同步队列中等待获取资源。 |
-| `PROPAGATE`   | -3   | 用于共享模式。在共享模式下，可能会出现线程在队列中无法被唤醒的情况，因此引入了 `PROPAGATE` 状态来解决这个问题。 |
+| `PROPAGATE`   | -3   | 用于共享模式。在**共享模式**下，可能会出现线程在队列中无法被唤醒的情况，因此引入了 `PROPAGATE` 状态来解决这个问题。 |
 |               | 0    | 加入队列的新节点的初始状态。                                 |
 
 在 AQS 的源码中，经常使用 `> 0` 、 `< 0` 来对 `waitStatus` 进行判断。
@@ -1266,4 +1266,945 @@ public final boolean release(int arg) {
 ```
 
 在 `release()` 方法中，主要做两件事：尝试释放锁和唤醒后继节点。对应方法如下：
+
+**1、尝试释放锁**
+
+通过 `tryRelease()` 方法尝试释放锁，该方法为模板方法，由自定义同步器实现，因此这里仍然以 `ReentrantLock` 为例来讲解。
+
+`ReentrantLock` 中实现的 `tryRelease()` 方法如下：
+
+```java
+// ReentrantLock
+protected final boolean tryRelease(int releases) {
+    int c = getState() - releases;
+    // 1、判断持有锁的线程是否为当前线程
+    if (Thread.currentThread() != getExclusiveOwnerThread())
+        throw new IllegalMonitorStateException();
+    boolean free = false;
+    // 2、如果 state 为 0，则表明当前线程已经没有重入次数。因此将 free 更新为 true，表明该线程会释放锁。
+    if (c == 0) {
+        free = true;
+        // 3、更新持有资源的线程为 null
+        setExclusiveOwnerThread(null);
+    }
+    // 4、更新 state 值
+    setState(c);
+    return free;
+}
+```
+
+在 `tryRelease()` 方法中，会先计算释放锁之后的 `state` 值，判断 `state` 值是否为 0。
+
+- 如果 `state == 0` ，表明该线程没有重入次数了，更新 `free = true` ，并修改持有资源的线程为 null，表明该线程完全释放这把锁。
+- 如果 `state != 0` ，表明该线程还存在重入次数，因此不更新 `free` 值，`free` 值为 `false` 表明该线程没有完全释放这把锁。
+
+之后更新 `state` 值，并返回 `free` 值，`free` 值表明线程是否完全释放锁。
+
+**2、唤醒后继节点**
+
+如果 `tryRelease()` 返回 `true` ，表明线程已经没有重入次数了，锁已经被完全释放，因此需要唤醒后继节点。
+
+在唤醒后继节点之前，需要判断是否可以唤醒后继节点，判断条件为： `h != null && h.waitStatus != 0` 。这里解释一下为什么要这样判断：
+
+- `h == null` ：表明 `head` 节点还没有被初始化，也就是 AQS 中的队列没有被初始化，因此无法唤醒队列中的线程节点。
+- `h != null && h.waitStatus == 0` ：表明头节点刚刚初始化完毕（节点的初始化状态为 0），后继节点线程还没有成功入队，因此不需要对后续节点进行唤醒。（当后继节点入队之后，会将前继节点的状态修改为 `SIGNAL` ，表明需要对后继节点进行唤醒）
+- `h != null && h.waitStatus != 0` ：其中 `waitStatus` 有可能大于 0，也有可能小于 0。其中 `> 0` 表明节点已经取消等待获取资源，`< 0` 表明节点处于正常等待状态。
+
+接下来进入 `unparkSuccessor()` 方法查看如何唤醒后继节点：
+
+```java
+// AQS：这里的入参 node 为队列的头节点（虚拟头节点）
+private void unparkSuccessor(Node node) {
+    int ws = node.waitStatus;
+    // 1、将头节点的状态进行清除，为后续的唤醒做准备。
+    if (ws < 0)
+        compareAndSetWaitStatus(node, ws, 0);
+
+    Node s = node.next;
+    // 2、如果后继节点异常，则需要从 tail 向前遍历，找到正常状态的节点进行唤醒。
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0)
+                s = t;
+    }
+    if (s != null)
+        // 3、唤醒后继节点
+        LockSupport.unpark(s.thread);
+}
+```
+
+在 `unparkSuccessor()` 中，如果头节点的状态 `< 0` （在正常情况下，只要有后继节点，头节点的状态应该为 `SIGNAL` ，即 -1），表示需要对后继节点进行唤醒，因此这里提前清除头节点的状态标识，将状态修改为 0，表示已经执行了对后续节点唤醒的操作。
+
+如果 `s == null` 或者 `s.waitStatus > 0` ，表明后继节点异常，此时不能唤醒异常节点，而是要找到正常状态的节点进行唤醒。
+
+因此需要从 `tail` 指针向前遍历，来找到第一个状态正常（`waitStatus <= 0`）的节点进行唤醒。
+
+**为什么要从 `tail` 指针向前遍历，而不是从 `head` 指针向后遍历，寻找正常状态的节点呢？**
+
+遍历的方向和 **节点的入队操作** 有关。入队方法如下：
+
+```java
+// AQS：节点入队方法
+private Node addWaiter(Node mode) {
+    Node node = new Node(Thread.currentThread(), mode);
+    Node pred = tail;
+    if (pred != null) {
+        // 1、先修改 prev 指针。
+        node.prev = pred;
+        if (compareAndSetTail(pred, node)) {
+            // 2、再修改 next 指针。
+            pred.next = node;
+            return node;
+        }
+    }
+    enq(node);
+    return node;
+}
+```
+
+在 `addWaiter()` 方法中，`node` 节点入队需要修改 `node.prev` 和 `pred.next` 两个指针，但是这两个操作并不是 **原子操作** ，先修改了 `node.prev` 指针，之后才修改 `pred.next` 指针。
+
+在极端情况下，可能会出现 `head` 节点的下一个节点状态为 `CANCELLED` ，此时新入队的节点仅更新了 `node.prev` 指针，还未更新 `pred.next` 指针，如下图：
+
+![](./../assets/aqs-addWaiter.png)
+
+这样如果从 `head` 指针向后遍历，无法找到新入队的节点，因此需要从 `tail` 指针向前遍历找到新入队的节点。
+
+## 8、图解 AQS 工作原理（独占模式）
+
+至此，AQS 中以独占模式获取资源、释放资源的源码就讲完了。为了对 AQS 的工作原理、节点状态变化有一个更加清晰的认识，接下来会通过画图的方式来了解整个 AQS 的工作原理。
+
+由于 AQS 是底层同步工具，获取和释放资源的方法并没有提供具体实现，因此这里基于 `ReentrantLock` 来画图进行讲解。
+
+假设总共有 3 个线程尝试获取锁，线程分别为 `T1` 、 `T2` 和 `T3` 。
+
+此时，假设线程 `T1` 先获取到锁，线程 `T2` 排队等待获取锁。在线程 `T2` 进入队列之前，需要对 AQS 内部队列进行初始化。`head` 节点在初始化后状态为 `0` 。AQS 内部初始化后的队列如下图：
+
+![](./../assets/aqs-acquire-and-release-process.png)
+
+此时，线程 `T2` 尝试获取锁。由于线程 `T1` 持有锁，因此线程 `T2` 会进入队列中等待获取锁。同时会将前继节点（ `head` 节点）的状态由 `0` 更新为 `SIGNAL` ，表示需要对 `head` 节点的后继节点进行唤醒。此时，AQS 内部队列如下图所示：
+
+![](./../assets/aqs-acquire-and-release-process-2.png)
+
+此时，线程 `T3` 尝试获取锁。由于线程 `T1` 持有锁，因此线程 `T3` 会进入队列中等待获取锁。同时会将前继节点（线程 `T2` 节点）的状态由 `0` 更新为 `SIGNAL` ，表示线程 `T2` 节点需要对后继节点进行唤醒。此时，AQS 内部队列如下图所示：
+
+![](./../assets/aqs-acquire-and-release-process-3.png)
+
+此时，假设线程 `T1` 释放锁，会唤醒后继节点 `T2` 。线程 `T2` 被唤醒后获取到锁，并且会从等待队列中退出。
+
+这里线程 `T2` 节点退出等待队列并不是直接从队列移除，而是**令线程 `T2` 节点成为新的 `head` 节点**，以此来退出资源获取的等待。此时 AQS 内部队列如下所示：
+
+![](./../assets/aqs-acquire-and-release-process-4.png)
+
+此时，假设线程 `T2` 释放锁，会唤醒后继节点 `T3` 。线程 `T3` 获取到锁之后，同样也退出等待队列，即将线程 `T3` 节点变为 `head` 节点来退出资源获取的等待。此时 AQS 内部队列如下所示：
+
+![](./../assets/aqs-acquire-and-release-process-5.png)
+
+## 9、AQS 资源获取源码分析（共享模式）
+
+AQS 中以共享模式获取资源的入口方法是 `acquireShared()` ，如下：
+
+```java
+// AQS
+public final void acquireShared(int arg) {
+    if (tryAcquireShared(arg) < 0)
+        doAcquireShared(arg);
+}
+```
+
+在 `acquireShared()` 方法中，会先尝试获取共享锁，如果获取失败，则将当前线程加入到队列中阻塞，等待唤醒后尝试获取共享锁，分别对应一下两个方法：`tryAcquireShared()` 和 `doAcquireShared()` 。
+
+其中 `tryAcquireShared()` 方法是 AQS 提供的模板方法，由同步器来实现具体逻辑。因此这里以 `Semaphore` 为例，来分析共享模式下，如何获取资源。
+
+### 9.1、`tryAcquireShared()`  分析
+
+`Semaphore` 中实现了公平锁和非公平锁，接下来以非公平锁为例来分析 `tryAcquireShared()` 源码。
+
+`Semaphore` 中重写的 `tryAcquireShared()` 方法会调用下边的 `nonfairTryAcquireShared()` 方法：
+
+```java
+// Semaphore 重写 AQS 的模板方法
+protected int tryAcquireShared(int acquires) {
+    return nonfairTryAcquireShared(acquires);
+}
+
+// Semaphore
+final int nonfairTryAcquireShared(int acquires) {
+    // 自旋等待
+    for (;;) {
+        // 1、获取可用资源数量。
+        int available = getState();
+        // 2、计算剩余资源数量。
+        int remaining = available - acquires;
+        // 3、如果剩余资源数量 < 0，则说明资源不足，直接返回；如果 CAS 更新 state 成功，则说明当前线程获取到了共享资源，直接返回。
+        if (remaining < 0 ||
+            compareAndSetState(available, remaining))
+            return remaining;
+    }
+}
+```
+
+在共享模式下，AQS 中的 `state` 值表示共享资源的数量。
+
+在 `nonfairTryAcquireShared()` 方法中，会在死循环（自旋）中不断尝试获取资源，如果 「剩余资源数不足」 或者 「当前线程成功获取资源」 ，就退出死循环。方法返回 **剩余的资源数量** ，根据返回值的不同，分为 3 种情况：
+
+- **剩余资源数量 > 0** ：表示成功获取资源，并且后续的线程也可以成功获取资源。
+- **剩余资源数量 = 0** ：表示成功获取资源，但是后续的线程无法成功获取资源。
+- **剩余资源数量 < 0** ：表示获取资源失败。
+
+### 9.2、`doAcquireShared()`  分析
+
+为了方便阅读，这里再贴一下获取资源的入口方法 `acquireShared()` ：
+
+```java
+// AQS
+public final void acquireShared(int arg) {
+    if (tryAcquireShared(arg) < 0)
+        doAcquireShared(arg);
+}
+```
+
+在 `acquireShared()` 方法中，会先通过 `tryAcquireShared()` 尝试获取资源。
+
+如果发现方法的返回值 `< 0` ，即剩余的资源数小于 0，则表明当前线程获取资源失败。因此会进入 `doAcquireShared()` 方法，将当前线程加入到 AQS 队列进行等待。如下：
+
+```java
+// AQS
+private void doAcquireShared(int arg) {
+    // 1、将当前线程加入到队列中等待。
+    final Node node = addWaiter(Node.SHARED);
+    boolean failed = true;
+    try {
+        boolean interrupted = false;
+        for (;;) {
+            final Node p = node.predecessor();
+            if (p == head) {
+                // 2、如果当前线程是等待队列的第一个节点，则尝试获取资源。
+                int r = tryAcquireShared(arg);
+                if (r >= 0) {
+					// 3、将当前线程节点移出等待队列，并唤醒后续线程节点。
+                    setHeadAndPropagate(node, r);
+                    p.next = null; // help GC
+                    if (interrupted)
+                        selfInterrupt();
+                    failed = false;
+                    return;
+                }
+            }
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                interrupted = true;
+        }
+    } finally {
+        // 3、如果获取资源失败，就会取消获取资源，将节点状态更新为 CANCELLED。
+        if (failed)
+            cancelAcquire(node);
+    }
+}
+```
+
+由于当前线程已经尝试获取资源失败了，因此在 `doAcquireShared()` 方法中，需要将当前线程封装为 Node 节点，加入到队列中进行等待。
+
+以 **共享模式** 获取资源和 **独占模式** 获取资源最大的不同之处在于：共享模式下，**资源的数量可能会大于 1，即可以多个线程同时持有资源**。
+
+因此在共享模式下，当线程线程被唤醒之后，成功获取到了资源，如果发现还存在剩余资源，就会尝试唤醒后边的线程去尝试获取资源。对应的 `setHeadAndPropagate()` 方法如下：
+
+```java
+// AQS
+private void setHeadAndPropagate(Node node, int propagate) {
+    Node h = head;
+    // 1、将当前线程节点移出等待队列，当前线程成为新的head
+    setHead(node);
+	// 2、唤醒后续等待节点。
+    if (propagate > 0 || h == null || h.waitStatus < 0 ||
+        (h = head) == null || h.waitStatus < 0) {
+        Node s = node.next;
+        if (s == null || s.isShared())
+            doReleaseShared();
+    }
+}
+```
+
+在 `setHeadAndPropagate()` 方法中，唤醒后续节点需要满足一定的条件，主要需要满足 2 个条件：
+
+- `propagate > 0` ：`propagate` 代表获取资源之后剩余的资源数量，如果 `> 0` ，则可以唤醒后续线程去获取资源。
+- `h.waitStatus < 0` ：这里的 `h` 节点是执行 `setHead()` 之前的 `head` 节点。判断 `head.waitStatus` 时使用 `< 0` ，主要为了确定 `head` 节点的状态为 `SIGNAL` 或 `PROPAGATE` 。如果 `head` 节点为 `SIGNAL` ，则可以唤醒后续节点；如果 `head` 节点状态为 `PROPAGATE` ，也可以唤醒后续节点（这是为了解决并发场景下出现的问题，后续会细讲）。
+
+代码中关于 **唤醒后续等待节点** 的 `if` 判断稍微复杂一些，这里来讲一下为什么这样写
+
+```java
+if (propagate > 0 || h == null || h.waitStatus < 0 ||
+    (h = head) == null || h.waitStatus < 0)
+```
+
+- `h == null || h.waitStatus < 0` ： `h == null` 用于防止空指针异常。正常情况下 h 不会为 `null` ，因为执行到这里之前，当前节点已经加入到队列中了，队列不可能还没有初始化。
+
+- `h.waitStatus < 0` 主要判断 `head` 节点的状态是否为 `SIGNAL` 或者 `PROPAGATE` ，直接使用 `< 0` 来判断比较方便。
+
+- `(h = head) == null || h.waitStatus < 0` ：如果到这里说明之前判断的 `h.waitStatus < 0` ，说明存在并发。
+
+- 同时存在其他线程在唤醒后续节点，已经将 `head` 节点的值由 `SIGNAL` 修改为 `0` 了。因此，这里重新获取新的 `head` 节点，这次获取的 `head` 节点为通过 `setHead()` 设置的当前线程节点，之后再次判断 `waitStatus` 状态。
+
+⚠连续检查了两次 head，原因是`head` 可能在并发下变化（详细示例看 [ 9.3、为什么需要 PROPAGATE 状态？](###9.3、为什么需要 PROPAGATE 状态？)）。
+
+**为什么 head 可能为 null？**
+
+因为AQS 队列初始化是懒加载，只有第一次竞争失败入队时才创建 dummy head，共享模式中的并发场景可能出现多个线程都在入队的情况，走到 `h == null` 并不意味着真的没人等待，而是队列正在变化。AQS 在共享模式里采取的是：宁可多唤醒，也不能漏唤醒。因为漏唤醒会导致线程永久阻塞。因此 `h==null` 真正的含义，不是“head不存在，所以有线程”，而是**“当前 head 状态不稳定，为了避免漏传播，继续 doReleaseShared”**
+
+**为什么重复检查两次 head？**
+
+因为一开始的 `Node h = head;`（老的head） 后`setHead(node);`（新set的head），head 已经变了。因此`(h = head) == null` 是重新读取最新 head，因为并发下 head 可能变化。
+
+如果 `if` 条件判断通过，就会走到 `doReleaseShared()` 方法唤醒后续等待节点，如下：
+
+```java
+private void doReleaseShared() {
+    for (;;) {
+        Node h = head;
+        // 1、队列中至少需要一个等待的线程节点。
+        if (h != null && h != tail) {
+            int ws = h.waitStatus;
+            // 2、如果 head 节点的状态为 SIGNAL，则可以唤醒后继节点。
+            if (ws == Node.SIGNAL) {
+                // 2.1 清除 head 节点的 SIGNAL 状态，更新为 0。表示已经唤醒该节点的后继节点了。
+                if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
+                    continue;
+                // 2.2 唤醒后继节点
+                unparkSuccessor(h);
+            }
+            // 3、如果 head 节点的状态为 0，则更新为 PROPAGATE。这是为了解决并发场景下存在的问题，接下来会细讲。
+            else if (ws == 0 &&
+                     !compareAndSetWaitStatus(h, 0, Node.PROPAGATE))
+                continue;
+        }
+        if (h == head)
+            break;
+    }
+}
+```
+
+在 `doReleaseShared()` 方法中，会判断 `head` 节点的 `waitStatus` 状态来决定接下来的操作，有两种情况：
+
+- `head` 节点的状态为 `SIGNAL` ：表明 `head` 节点存在后继节点需要唤醒，因此通过 `CAS` 操作将 `head` 节点的 `SIGNAL` 状态更新为 `0` 。通过清除 `SIGNAL` 状态来表示已经对 `head` 节点的后继节点进行唤醒操作了。
+- `head` 节点的状态为 `0` ：表明存在并发情况，需要将 `0` 修改为 `PROPAGATE` 来保证在并发场景下可以正常唤醒线程。
+
+### 9.3、为什么需要 PROPAGATE 状态？
+
+在 `doReleaseShared()` 释放资源时，第 3 步不太容易理解，即如果发现 `head` 节点的状态是 `0` ，就将 `head` 节点的状态由 `0` 更新为 `PROPAGATE` 。
+
+AQS 中，Node 节点的 `PROPAGATE` 就是为了处理并发场景下可能出现的无法唤醒线程节点的问题。`PROPAGATE` 只在 `doReleaseShared()` 方法中用到一次。
+
+**接下来通过案例分析，为什么需要 `PROPAGATE` 状态？**
+
+在共享模式下，线程获取和释放资源的方法调用链如下：
+
+- 线程获取资源的方法调用链为： `acquireShared() -> tryAcquireShared() -> 线程阻塞等待唤醒 -> tryAcquireShared() -> setHeadAndPropagate() -> if (剩余资源数 > 0) || (head.waitStatus < 0) 则唤醒后续节点` 。
+- 线程释放资源的方法调用链为： `releaseShared() -> tryReleaseShared() -> doReleaseShared()` 。
+
+**如果在释放资源时，没有将 `head` 节点的状态由 `0` 改为 `PROPAGATE` ：**
+
+假设总共有 4 个线程尝试以共享模式获取资源，总共有 2 个资源。初始 `T3` 和 `T4` 线程获取到了资源，`T1` 和 `T2` 线程没有获取到，因此在队列中排队等候。
+
+- 在时刻 1 时，线程 `T1` 和 `T2` 在等待队列中，`T3` 和 `T4` 持有资源。此时等待队列内节点以及对应状态为（括号内为节点的 `waitStatus` 状态）：
+
+  `head(-1) -> T1(-1) -> T2(0)` 。
+
+- 在时刻 2 时，线程 `T3` 释放资源，通过 `doReleaseShared()` 方法将 `head` 节点的状态由 `SIGNAL` 更新为 `0` ，并唤醒线程 `T1` ，之后线程 `T3` 退出。
+
+  线程 `T1` 被唤醒之后，通过 `tryAcquireShared()` 获取到资源，但是此时还未来得及执行 `setHeadAndPropagate()` 将自己设置为 `head` 节点。此时等待队列内节点状态为：
+
+  `head(0) -> T1(-1) -> T2(0)` 。
+
+- 在时刻 3 时，线程 `T4` 释放资源， 由于此时 `head` 节点的状态为 `0` ，因此在 `doReleaseShared()` 方法中无法唤醒 `head` 的后继节点， 之后线程 `T4` 退出。
+
+- 在时刻 4 时，线程 `T1` 继续执行 `setHeadAndPropagate()` 方法将自己设置为 `head` 节点。
+
+  但是此时由于线程 `T1` 执行 `tryAcquireShared()` 方法返回的剩余资源数为 `0` ，并且 `head` 节点的状态为 `0` ，因此线程 `T1` 并不会在 `setHeadAndPropagate()` 方法中唤醒后续节点。此时等待队列内节点状态为：
+
+  `head(-1，线程 T1 节点) -> T2(0)` 。
+
+此时，就导致线程 `T2` 节点在等待队列中，无法被唤醒。对应时刻表如下：
+
+| 时刻   | 线程 T1                                                      | 线程 T2  | 线程 T3          | 线程 T4                                                      | 等待队列                          |
+| ------ | ------------------------------------------------------------ | -------- | ---------------- | ------------------------------------------------------------ | --------------------------------- |
+| 时刻 1 | 等待队列                                                     | 等待队列 | 持有资源         | 持有资源                                                     | `head(-1) -> T1(-1) -> T2(0)`     |
+| 时刻 2 | （执行）被唤醒后，获取资源，但未来得及将自己设置为 `head` 节点 | 等待队列 | （执行）释放资源 | 持有资源                                                     | `head(0) -> T1(-1) -> T2(0)`      |
+| 时刻 3 |                                                              | 等待队列 | 已退出           | （执行）释放资源。但 `head` 节点状态为 `0` ，无法唤醒后继节点 | `head(0) -> T1(-1) -> T2(0)`      |
+| 时刻 4 | （执行）将自己设置为 `head` 节点                             | 等待队列 | 已退出           | 已退出                                                       | `head(-1，线程 T1 节点) -> T2(0)` |
+
+**如果在线程释放资源时，将 `head` 节点的状态由 `0` 改为 `PROPAGATE（-3）` ，则可以解决上边出现的并发问题，如下：**
+
+- 在时刻 1 时，线程 `T1` 和 `T2` 在等待队列中，`T3` 和 `T4` 持有资源。此时等待队列内节点以及对应状态为：
+
+  `head(-1) -> T1(-1) -> T2(0)` 。
+
+- 在时刻 2 时，线程 `T3` 释放资源，通过 `doReleaseShared()` 方法将 `head` 节点的状态由 `SIGNAL` 更新为 `0` ，并唤醒线程 `T1` ，之后线程 `T3` 退出。
+
+  线程 `T1` 被唤醒之后，通过 `tryAcquireShared()` 获取到资源，但是此时还未来得及执行 `setHeadAndPropagate()` 将自己设置为 `head` 节点。此时等待队列内节点状态为：
+
+  `head(0) -> T1(-1) -> T2(0)` 。
+
+- 在时刻 3 时，线程 `T4` 释放资源， 由于此时 `head` 节点的状态为 `0` ，因此在 `doReleaseShared()` 方法中会将 `head` 节点的状态由 `0` 更新为 `PROPAGATE` ， 之后线程 `T4` 退出。此时等待队列内节点状态为：
+
+  `head(PROPAGATE) -> T1(-1) -> T2(0)` 。
+
+- 在时刻 4 时，线程 `T1` 继续执行 `setHeadAndPropagate()` 方法将自己设置为 `head` 节点。此时等待队列内节点状态为：
+
+  `head(-1，线程 T1 节点) -> T2(0)` 。
+
+- 在时刻 5 时，虽然此时由于线程 `T1` 执行 `tryAcquireShared()` 方法返回的剩余资源数为 `0` ，但是 `head` 节点状态为 `PROPAGATE < 0` （这里的 `head` 节点是老的 `head` 节点，而不是刚成为 `head` 节点的线程 `T1` 节点）。因此线程 `T1` 会在 `setHeadAndPropagate()` 方法中唤醒后续 `T2` 节点，并将 `head` 节点的状态由 `SIGNAL` 更新为 `0`。此时等待队列内节点状态为：
+
+  `head(0，线程 T1 节点) -> T2(0)` 。
+
+- 在时刻 6 时，线程 `T2` 被唤醒后，获取到资源，并将自己设置为 `head` 节点。此时等待队列内节点状态为：
+
+  `head(0，线程 T2 节点)` 。
+
+有了 `PROPAGATE` 状态，就可以避免线程 `T2` 无法被唤醒的情况。对应时刻表如下：
+
+| 时刻   | 线程 T1                                                      | 线程 T2                                                      | 线程 T3          | 线程 T4                                                      | 等待队列                             |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------ | ---------------- | ------------------------------------------------------------ | ------------------------------------ |
+| 时刻 1 | 等待队列                                                     | 等待队列                                                     | 持有资源         | 持有资源                                                     | `head(-1) -> T1(-1) -> T2(0)`        |
+| 时刻 2 | （执行）被唤醒后，获取资源，但未来得及将自己设置为 `head` 节点 | 等待队列                                                     | （执行）释放资源 | 持有资源                                                     | `head(0) -> T1(-1) -> T2(0)`         |
+| 时刻 3 | 未继续向下执行                                               | 等待队列                                                     | 已退出           | （执行）释放资源。此时会将 `head` 节点状态由 `0` 更新为 `PROPAGATE` | `head(PROPAGATE) -> T1(-1) -> T2(0)` |
+| 时刻 4 | （执行）将自己设置为 `head` 节点                             | 等待队列                                                     | 已退出           | 已退出                                                       | `head(-1，线程 T1 节点) -> T2(0)`    |
+| 时刻 5 | （执行）由于 `head` 节点状态为 `PROPAGATE < 0` ，因此会在 `setHeadAndPropagate()` 方法中唤醒后续节点，此时将新的 `head` 节点的状态由 `SIGNAL` 更新为 `0` ，并唤醒线程 `T2` | 等待队列                                                     | 已退出           | 已退出                                                       | `head(0，线程 T1 节点) -> T2(0)`     |
+| 时刻 6 | 已退出                                                       | （执行）线程 `T2` 被唤醒后，获取到资源，并将自己设置为 `head` 节点 | 已退出           | 已退出                                                       | `head(0，线程 T2 节点)`              |
+
+## 10、AQS 资源释放源码分析（共享模式）
+
+AQS 中以共享模式释放资源的入口方法是 `releaseShared()` ，代码如下：
+
+```java
+// AQS
+public final boolean releaseShared(int arg) {
+    if (tryReleaseShared(arg)) {
+        // 释放资源并唤醒后续节点
+        doReleaseShared();
+        return true;
+    }
+    return false;
+}
+```
+
+其中 `tryReleaseShared()` 方法是 AQS 提供的模板方法，这里同样以 `Semaphore` 来讲解，如下：
+
+```java
+// Semaphore
+protected final boolean tryReleaseShared(int releases) {
+    for (;;) {
+        int current = getState();
+        int next = current + releases;
+        if (next < current) // overflow
+            throw new Error("Maximum permit count exceeded");
+        if (compareAndSetState(current, next))
+            return true;
+    }
+}
+```
+
+在 `Semaphore` 实现的 `tryReleaseShared()` 方法中，会在死循环内不断尝试释放资源，即通过 `CAS` 操作来更新 `state` 值。
+
+如果更新成功，则证明资源释放成功，会进入到 `doReleaseShared()` 方法。
+
+`doReleaseShared()` 方法在前文获取资源（共享模式）的部分已进行了详细的源码分析，此处不再重复。
+
+## 11、Condition 条件队列的工作机制
+
+前面在 `waitStatus` 状态表格中提到过 `CONDITION`（值为 -2）状态，表示节点在 Condition 条件队列中等待。这里系统讲解 Condition 条件队列的工作机制。
+
+### 11.1、什么是 Condition？
+
+`Condition` 是 `java.util.concurrent.locks` 包中定义的接口，它提供了类似于 `Object.wait()` / `Object.notify()` 的线程等待/通知机制，但功能更加强大和灵活。
+
+`Condition` 必须与 `Lock` 配合使用，就像 `wait/notify` 必须与 `synchronized` 配合使用一样。
+
+与 `Object` 的 `wait/notify` 相比，`Condition` 的主要优势在于：
+
+- **支持多个等待队列**：一个 `Lock` 可以创建多个 `Condition` 实例，不同的线程可以在不同的条件上等待，实现更精细的线程协作。而 `synchronized` 只有一个等待队列。
+- **支持不响应中断的等待**：`Condition` 提供了 `awaitUninterruptibly()` 方法。
+- **支持超时等待**：`Condition` 提供了 `awaitNanos(long)` 和 `await(long, TimeUnit)` 方法，可以设定等待的截止时间。
+
+**`Object.wait`  与 `Condition.await` 对应关系**
+
+| Object        | Condition         |
+| ------------- | ----------------- |
+| wait()        | await()           |
+| wait(timeout) | await(time, unit) |
+| notify()      | signal()          |
+| notifyAll()   | signalAll()       |
+
+但Condition 的超时功能更强，支持：
+
+- 纳秒级
+- 剩余时间计算
+- Deadline
+- 不同等待队列
+
+### 11.2、AQS 中的两种队列
+
+在 AQS 内部实际上维护了 **两种队列**：
+
+1. **同步队列（CLH 变体队列）**：就是前面详细分析过的双向队列，用于存放获取资源失败而等待的线程节点。
+2. **条件队列（Condition Queue）**：是一个单向链表，用于存放调用了 `Condition.await()` 方法而等待的线程节点。每个 `Condition` 实例维护一个独立的条件队列。
+
+条件队列中的节点使用 `Node` 的 `nextWaiter` 指针来链接下一个节点，形成单向链表。条件队列的头节点为 `firstWaiter`，尾节点为 `lastWaiter`。
+
+### 11.3、Condition 的核心工作流程
+
+AQS 的内部类 `ConditionObject` 实现了 `Condition` 接口，其核心方法为 `await()` 和 `signal()`。
+
+**`await()` 方法的工作流程：**
+
+1. 将当前线程封装为 `Node` 节点（`waitStatus` 设置为 `CONDITION`），加入到条件队列的尾部。
+2. 完全释放当前线程持有的锁（即将 `state` 值置为 0），并保存释放前的 `state` 值。
+3. 阻塞当前线程，等待被 `signal()` 唤醒或被中断。
+4. 被唤醒后，重新通过 `acquireQueued()` 进入同步队列竞争锁，并恢复之前保存的 `state` 值（重入次数）。
+
+**`signal()` 方法的工作流程：**
+
+1. 检查调用 `signal()` 的线程是否持有锁（不持有则抛出 `IllegalMonitorStateException`）。
+2. 将条件队列中第一个等待的节点从条件队列移除。
+3. 将该节点的 `waitStatus` 从 `CONDITION` 修改为 `0`，并通过 `enq()` 方法将其加入到同步队列的尾部。
+4. 如果同步队列中前驱节点的状态异常（`CANCELLED`）或者 CAS 设置前驱节点状态为 `SIGNAL` 失败，则直接唤醒该线程。
+
+`signalAll()` 方法与 `signal()` 类似，区别在于它会将条件队列中的 **所有** 节点都转移到同步队列中。
+
+下面的代码示例展示了 `Condition` 的典型用法——实现一个简单的有界阻塞队列：
+
+```java
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
+
+public class SimpleBlockingQueue<T> {
+    private final Queue<T> queue = new LinkedList<>();
+    private final int capacity;
+    private final ReentrantLock lock = new ReentrantLock();
+    // 两个不同的条件队列：分别用于"队列不满"和"队列不空"
+    private final Condition notFull = lock.newCondition();
+    private final Condition notEmpty = lock.newCondition();
+
+    public SimpleBlockingQueue(int capacity) {
+        this.capacity = capacity;
+    }
+
+    /**
+     * 向队列中添加元素，如果队列已满则等待。
+     */
+    public void put(T item) throws InterruptedException {
+        lock.lock();
+        try {
+            // 队列满时，在 notFull 条件上等待
+            while (queue.size() == capacity) {
+                // await() 可能被虚假唤醒或提前唤醒，因此需要 while 再检查一遍条件
+                notFull.await();
+            }
+            queue.offer(item);
+            // 添加元素后，通知在 notEmpty 条件上等待的消费者线程
+            notEmpty.signal();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * 从队列中取出元素，如果队列为空则等待。
+     */
+    public T take() throws InterruptedException {
+        lock.lock();
+        try {
+            // 队列空时，在 notEmpty 条件上等待
+            while (queue.isEmpty()) {
+                notEmpty.await();
+            }
+            T item = queue.poll();
+            // 取出元素后，通知在 notFull 条件上等待的生产者线程
+            notFull.signal();
+            return item;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public static void main(String[] args) {
+        SimpleBlockingQueue<Integer> blockingQueue = new SimpleBlockingQueue<>(5);
+
+        // 生产者线程
+        Thread producer = new Thread(() -> {
+            try {
+                for (int i = 0; i < 10; i++) {
+                    blockingQueue.put(i);
+                    System.out.println("生产: " + i);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "Producer");
+
+        // 消费者线程
+        Thread consumer = new Thread(() -> {
+            try {
+                for (int i = 0; i < 10; i++) {
+                    int item = blockingQueue.take();
+                    System.out.println("消费: " + item);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "Consumer");
+
+        producer.start();
+        consumer.start();
+    }
+}
+```
+
+在上面的例子中，`notFull` 和 `notEmpty` 是两个独立的 `Condition` 实例，分别维护各自的条件队列。生产者在队列满时在 `notFull` 上等待，消费者在队列空时在 `notEmpty` 上等待。这种分离等待条件的设计，避免了不必要的线程唤醒，比 `synchronized` + `wait/notifyAll` 更加高效。
+
+
+
+### 11.4、支持创建Condition的锁/同步器
+
+在 Java 并发包（`java.util.concurrent.locks`）中，`Condition` 接口由实现了 `Lock` 接口的锁通过 `newCondition()` 方法创建。
+
+| 锁 / 同步器                        | 是否支持 Condition                                           |
+| ---------------------------------- | ------------------------------------------------------------ |
+| `ReentrantLock`                    | ✅ 支持，可创建多个（独占锁）                                 |
+| `ReentrantReadWriteLock.WriteLock` | ✅ 支持（独占锁）                                             |
+| `ReentrantReadWriteLock.ReadLock`  | ❌ 抛 `UnsupportedOperationException`，                                                                                                                   因为读锁是共享锁，多个线程可同时持有，没有"唯一持有者"的概念，Condition 的语义无法成立 |
+| `StampedLock`                      | ❌ 不支持                                                     |
+| `synchronized`                     | ❌ 用 `Object.wait/notify` 代替                               |
+| 基于 AQS 独占模式的自定义锁        | ✅ 通过 `ConditionObject`                                     |
+
+### 11.5、`await()` 核心源码分析
+
+```java
+// AQS 内部类 ConditionObject
+public final void await() throws InterruptedException {
+    if (Thread.interrupted())
+        throw new InterruptedException();
+    // 1、将当前线程封装为 Node 节点，加入条件队列
+    Node node = addConditionWaiter();
+    // 2、完全释放锁，并保存释放前的 state 值
+    int savedState = fullyRelease(node);
+    int interruptMode = 0;
+    // 3、如果节点不在同步队列中，则阻塞当前线程
+    // signal 已经调用后，将node从条件队列转移到同步队列，但node还未真正进入同步队列，因此需要while判断
+    while (!isOnSyncQueue(node)) {
+        LockSupport.park(this);
+        if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+            break;
+    }
+    // 4、被唤醒后，重新进入同步队列竞争锁
+    // 4.1、线程重新竞争锁失败过程中，被中断过
+    // 	- acquireQueued(node, savedState) 返回 true：等待锁期间发生过 interrupt
+    //  - interruptMode != THROW_IE：不是“抛 InterruptedException”的模式
+    if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
+        // 等锁拿到后，再补一次 interrupt 标记
+        interruptMode = REINTERRUPT;
+    
+    // 4.2、清理 condition 队列中的“无效节点”
+    if (node.nextWaiter != null)
+        unlinkCancelledWaiters();
+    
+    // 4.3、处理线程中断语义。
+    if (interruptMode != 0)
+        reportInterruptAfterWait(interruptMode);
+}
+```
+
+`await()` 方法中有两个关键操作：
+
+- `fullyRelease(node)`：完全释放锁（而不是只释放一次），这样即使线程重入了多次锁，也能在等待期间让其他线程获取到锁。被唤醒后会通过 `acquireQueued(node, savedState)` 恢复之前的重入次数。
+- `isOnSyncQueue(node)`：判断节点是否已经被转移到同步队列。当其他线程调用 `signal()` 时，节点会从条件队列转移到同步队列，此时 `isOnSyncQueue()` 返回 `true`，线程退出 `while` 循环，开始竞争锁。
+
+## 12、公平锁与非公平锁的性能差异分析
+
+前面的源码分析中，以 `ReentrantLock` 的非公平锁为例讲解了 `tryAcquire()` 的实现。实际上 `ReentrantLock` 同时支持公平锁和非公平锁两种模式。这里深入分析二者的实现差异及其对性能的影响。
+
+### 12.1、源码层面的差异
+
+`ReentrantLock` 默认使用非公平锁，通过构造参数可以切换为公平锁：
+
+```java
+// 非公平锁（默认）
+ReentrantLock unfairLock = new ReentrantLock();
+// 公平锁
+ReentrantLock fairLock = new ReentrantLock(true);
+```
+
+二者的核心差异在于 `tryAcquire()` 方法的实现。非公平锁的 `nonfairTryAcquire()` 前面已经分析过，下面看公平锁的实现：
+
+```java
+// ReentrantLock.FairSync
+protected final boolean tryAcquire(int acquires) {
+    final Thread current = Thread.currentThread();
+    int c = getState();
+    if (c == 0) {
+        // 关键差异：先调用 hasQueuedPredecessors() 判断同步队列中是否有等待更久的线程
+        if (!hasQueuedPredecessors() &&
+            compareAndSetState(0, acquires)) {
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        if (nextc < 0)
+            throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+    }
+    return false;
+}
+```
+
+**唯一的区别** 就是公平锁在 CAS 修改 `state` 之前多加了一个 `hasQueuedPredecessors()` 判断：
+
+```java
+// AQS
+public final boolean hasQueuedPredecessors() {
+    Node t = tail;
+    Node h = head;
+    Node s;
+    return h != t &&
+        ((s = h.next) == null || s.thread != Thread.currentThread());
+}
+```
+
+这个方法用于判断当前线程之前是否有其他线程在排队。如果有，则当前线程不能直接获取锁，必须排队等待，从而保证了 **FIFO** 的公平性。
+
+而非公平锁没有这个判断，当锁刚好释放时，新来的线程可以直接通过 CAS 抢到锁，即使同步队列中已经有其他线程在等待。
+
+### 12.2、性能差异对比
+
+| 对比维度       | 非公平锁（默认）                                             | 公平锁                                           |
+| -------------- | ------------------------------------------------------------ | ------------------------------------------------ |
+| **吞吐量**     | 更高。新线程有机会直接获取锁，减少了线程上下文切换           | 较低。所有线程都必须排队，增加了上下文切换的开销 |
+| **线程饥饿**   | 可能发生。极端情况下某些线程长时间无法获取锁                 | 不会发生。严格按照请求顺序分配锁                 |
+| **上下文切换** | 较少。持有锁的线程释放锁后，新到达的线程可能直接获取锁，不需要唤醒队列中的线程 | 较多。每次释放锁都需要唤醒队列中的下一个线程     |
+| **适用场景**   | 大多数场景（对响应时间和吞吐量要求较高）                     | 对公平性有严格要求的场景（如资源分配、任务调度） |
+
+### 12.3、为什么非公平锁性能通常更好？
+
+关键原因在于 **减少了线程上下文切换的次数**。当持有锁的线程 A 释放锁后：
+
+- **非公平锁**：此时如果恰好有线程 B 正在尝试获取锁（还没有进入同步队列），线程 B 可以直接通过 CAS 获取到锁并立即执行，省去了唤醒队列中线程的开销。而队列中等待的线程被唤醒后发现锁被占用，会重新阻塞，虽然看起来"浪费"了一次唤醒，但总体上减少了线程切换次数。
+- **公平锁**：线程 B 必须排到队列尾部，然后唤醒队列头部的线程。从线程被唤醒到真正开始执行之间，存在一段 **调度延迟**（线程状态从阻塞切换到运行），在这段延迟期间锁处于空闲状态，降低了锁的利用率。
+
+Doug Lea 在 `ReentrantLock` 的文档中指出：使用公平锁的程序在多线程环境下的总体吞吐量通常低于使用非公平锁的程序（即更慢），因此 `ReentrantLock` 默认使用非公平模式。但在需要保证请求处理顺序或避免线程饥饿的场景中（如连接池分配），公平锁是更好的选择。
+
+下面通过代码示例来演示公平锁与非公平锁在行为上的差异：
+
+```java
+import java.util.concurrent.locks.ReentrantLock;
+
+public class FairVsUnfairLockDemo {
+    // 分别测试公平锁和非公平锁
+    private static void testLock(ReentrantLock lock, String lockType) {
+        System.out.println("=== " + lockType + " ===");
+        Runnable task = () -> {
+            for (int i = 0; i < 2; i++) {
+                lock.lock();
+                try {
+                    System.out.println(Thread.currentThread().getName() + " 获取到锁");
+                } finally {
+                    lock.unlock();
+                }
+            }
+        };
+
+        Thread[] threads = new Thread[5];
+        for (int i = 0; i < 5; i++) {
+            threads[i] = new Thread(task, lockType + "-线程-" + i);
+        }
+        for (Thread t : threads) {
+            t.start();
+        }
+        for (Thread t : threads) {
+            try { t.join(); } catch (InterruptedException e) { }
+        }
+        System.out.println();
+    }
+
+    public static void main(String[] args) {
+        // 非公平锁：同一个线程可能连续多次获取到锁
+        testLock(new ReentrantLock(false), "非公平锁");
+
+        // 公平锁：线程按请求顺序交替获取锁
+        testLock(new ReentrantLock(true), "公平锁");
+    }
+}
+```
+
+运行上面的代码可以观察到：非公平锁模式下，同一个线程可能连续多次获取到锁（因为它释放锁后立即又去竞争，有很大概率在队列中的线程被唤醒之前就抢到了锁）；而公平锁模式下，线程获取锁的顺序更加均匀，不会出现某个线程连续霸占锁的情况。
+
+# 三、常见同步工具类
+
+## 1、Semaphore(信号量)
+
+### 1.1、介绍
+
+`synchronized` 和 `ReentrantLock` 都是一次只允许一个线程访问某个资源，而`Semaphore`(信号量)可以用来控制同时访问特定资源的线程数量。
+
+`Semaphore` 的使用简单，我们这里假设有 `N(N>5)` 个线程来获取 `Semaphore` 中的共享资源，下面的代码表示同一时刻 N 个线程中只有 5 个线程能获取到共享资源，其他线程都会阻塞，只有获取到共享资源的线程才能执行。等到有线程释放了共享资源，其他阻塞的线程才能获取到。
+
+```java
+// 初始共享资源数量
+final Semaphore semaphore = new Semaphore(5);
+// 获取1个许可
+semaphore.acquire();
+// 释放1个许可
+semaphore.release();
+```
+
+当初始的资源个数为 1 的时候，`Semaphore` 退化为排他锁。
+
+`Semaphore` 有两种模式：。
+
+- **公平模式：** 调用 `acquire()` 方法的顺序就是获取许可证的顺序，遵循 FIFO；
+- **非公平模式：** 抢占式的。
+
+`Semaphore` 对应的两个构造方法如下：
+
+```java
+public Semaphore(int permits) {
+    sync = new NonfairSync(permits);
+}
+
+public Semaphore(int permits, boolean fair) {
+    sync = fair ? new FairSync(permits) : new NonfairSync(permits);
+}
+```
+
+**这两个构造方法，都必须提供许可的数量，第二个构造方法可以指定是公平模式还是非公平模式，默认非公平模式。**
+
+`Semaphore` 通常用于那些资源有明确访问数量限制的场景比如限流（仅限于单机模式，实际项目中推荐使用 Redis +Lua 来做限流）。
+
+### 1.2、原理
+
+`Semaphore` 是共享锁的一种实现，它默认构造 AQS 的 `state` 值为 `permits`，你可以将 `permits` 的值理解为许可证的数量，只有拿到许可证的线程才能执行。
+
+以无参 `acquire` 方法为例，调用`semaphore.acquire()` ，线程尝试获取许可证，如果 `state > 0` 的话，则表示可以获取成功，如果 `state <= 0` 的话，则表示许可证数量不足，获取失败。
+
+如果可以获取成功的话(`state > 0` )，会尝试使用 CAS 操作去修改 `state` 的值 `state=state-1`。如果获取失败则会创建一个 Node 节点加入等待队列，挂起当前线程。
+
+```java
+// 获取1个许可证
+public void acquire() throws InterruptedException {
+    sync.acquireSharedInterruptibly(1);
+}
+
+// 获取一个或者多个许可证
+public void acquire(int permits) throws InterruptedException {
+    if (permits < 0) throw new IllegalArgumentException();
+    sync.acquireSharedInterruptibly(permits);
+}
+```
+
+`acquireSharedInterruptibly`方法是 `AbstractQueuedSynchronizer` 中的默认实现。
+
+```java
+// 共享模式下获取许可证，获取成功则返回，失败则加入等待队列，挂起线程
+public final void acquireSharedInterruptibly(int arg)
+    throws InterruptedException {
+    if (Thread.interrupted())
+      throw new InterruptedException();
+        // 尝试获取许可证，arg为获取许可证个数，当获取失败时,则创建一个节点加入等待队列，挂起当前线程。
+    if (tryAcquireShared(arg) < 0)
+      doAcquireSharedInterruptibly(arg);
+}
+```
+
+这里再以非公平模式（`NonfairSync`）的为例，看看 `tryAcquireShared` 方法的实现。
+
+```java
+// 共享模式下尝试获取资源(在Semaphore中的资源即许可证):
+protected int tryAcquireShared(int acquires) {
+    return nonfairTryAcquireShared(acquires);
+}
+
+// 非公平的共享模式获取许可证
+final int nonfairTryAcquireShared(int acquires) {
+    for (;;) {
+        // 当前可用许可证数量
+        int available = getState();
+        /*
+         * 尝试获取许可证，当前可用许可证数量小于等于0时，返回负值，表示获取失败，
+         * 当前可用许可证大于0时才可能获取成功，CAS失败了会循环重新获取最新的值尝试获取
+         */
+        int remaining = available - acquires;
+        if (remaining < 0 ||
+            compareAndSetState(available, remaining))
+            return remaining;
+    }
+}
+```
+
+以无参 `release` 方法为例，调用`semaphore.release();` ，线程尝试释放许可证，并使用 CAS 操作去修改 `state` 的值 `state=state+1`。释放许可证成功之后，同时会唤醒等待队列中的一个线程。被唤醒的线程会重新尝试去修改 `state` 的值 `state=state-1` ，如果 `state > 0` 则获取令牌成功，否则重新进入等待队列，挂起线程。
+
+```java
+// 释放一个许可证
+public void release() {
+    sync.releaseShared(1);
+}
+
+// 释放一个或者多个许可证
+public void release(int permits) {
+    if (permits < 0) throw new IllegalArgumentException();
+    sync.releaseShared(permits);
+}
+```
+
+`releaseShared`方法是 `AbstractQueuedSynchronizer` 中的默认实现。
+
+```java
+// 释放共享锁
+// 如果 tryReleaseShared 返回 true，就唤醒等待队列中的一个或多个线程。
+public final boolean releaseShared(int arg) {
+    //释放共享锁
+    if (tryReleaseShared(arg)) {
+      //释放当前节点的后置等待节点
+      doReleaseShared();
+      return true;
+    }
+    return false;
+}
+```
+
+`tryReleaseShared` 方法是`Semaphore` 的内部类 `Sync` 重写的一个方法， `AbstractQueuedSynchronizer`中的默认实现仅仅抛出 `UnsupportedOperationException` 异常。
+
+```java
+// 内部类 Sync 中重写的一个方法
+// 尝试释放资源
+protected final boolean tryReleaseShared(int releases) {
+    for (;;) {
+        int current = getState();
+        // 可用许可证+1
+        int next = current + releases;
+        if (next < current) // overflow
+            throw new Error("Maximum permit count exceeded");
+         // CAS修改state的值
+        if (compareAndSetState(current, next))
+            return true;
+    }
+}
+```
+
+可以看到，上面提到的几个方法底层基本都是通过同步器 `sync` 实现的。`Sync` 是 `CountDownLatch` 的内部类 , 继承了 `AbstractQueuedSynchronizer` ，重写了其中的某些方法。并且，Sync 对应的还有两个子类 `NonfairSync`（对应非公平模式） 和 `FairSync`（对应公平模式）。
+
+```java
+private static final class Sync extends AbstractQueuedSynchronizer {
+  // ...
+}
+static final class NonfairSync extends Sync {
+  // ...
+}
+static final class FairSync extends Sync {
+  // ...
+}
+```
 
