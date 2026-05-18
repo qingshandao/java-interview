@@ -2063,7 +2063,7 @@ semaphore.release();
 
 当初始的资源个数为 1 的时候，`Semaphore` 退化为排他锁。
 
-`Semaphore` 有两种模式：。
+`Semaphore` 有两种模式：
 
 - **公平模式：** 调用 `acquire()` 方法的顺序就是获取许可证的顺序，遵循 FIFO；
 - **非公平模式：** 抢占式的。
@@ -2144,7 +2144,7 @@ final int nonfairTryAcquireShared(int acquires) {
 }
 ```
 
-以无参 `release` 方法为例，调用`semaphore.release();` ，线程尝试释放许可证，并使用 CAS 操作去修改 `state` 的值 `state=state+1`。释放许可证成功之后，同时会唤醒等待队列中的一个线程。被唤醒的线程会重新尝试去修改 `state` 的值 `state=state-1` ，如果 `state > 0` 则获取令牌成功，否则重新进入等待队列，挂起线程。
+以无参 `release` 方法为例，调用`semaphore.release();` ，线程尝试释放许可证，并使用 CAS 操作去修改 `state` 的值 `state=state + 1`。释放许可证成功之后，同时会唤醒等待队列中的一个线程。被唤醒的线程会重新尝试去修改 `state` 的值 `state=state-1` ，如果 `state > 0` 则获取令牌成功，否则重新进入等待队列，挂起线程。
 
 ```java
 // 释放一个许可证
@@ -2208,3 +2208,683 @@ static final class FairSync extends Sync {
 }
 ```
 
+### 1.3、实战
+
+```java
+public class SemaphoreExample {
+  // 请求的数量
+  private static final int threadCount = 550;
+
+  public static void main(String[] args) throws InterruptedException {
+    // 创建一个具有固定线程数量的线程池对象（如果这里线程池的线程数量给太少的话你会发现执行的很慢）
+    ExecutorService threadPool = Executors.newFixedThreadPool(300);
+    // 初始许可证数量
+    final Semaphore semaphore = new Semaphore(20);
+
+    for (int i = 0; i < threadCount; i++) {
+      final int threadnum = i;
+      threadPool.execute(() -> {// Lambda 表达式的运用
+        try {
+          semaphore.acquire();// 获取一个许可，所以可运行线程数量为20/1=20
+          test(threadnum);
+          semaphore.release();// 释放一个许可
+        } catch (InterruptedException e) {
+          // TODO Auto-generated catch block
+          e.printStackTrace();
+        }
+
+      });
+    }
+    threadPool.shutdown();
+    System.out.println("finish");
+  }
+
+  public static void test(int threadnum) throws InterruptedException {
+    Thread.sleep(1000);// 模拟请求的耗时操作
+    System.out.println("threadnum:" + threadnum);
+    Thread.sleep(1000);// 模拟请求的耗时操作
+  }
+}
+```
+
+执行 `acquire()` 方法阻塞，直到有一个许可证可以获得然后拿走一个许可证；每个 `release` 方法增加一个许可证，这可能会释放一个阻塞的 `acquire()` 方法。然而，其实并没有实际的许可证这个对象，`Semaphore` 只是维持了一个可获得许可证的数量。 `Semaphore` 经常用于限制获取某种资源的线程数量。
+
+当然一次也可以一次拿取和释放多个许可，不过一般没有必要这样做：
+
+```java
+semaphore.acquire(5);// 获取5个许可，所以可运行线程数量为20/5=4
+test(threadnum);
+semaphore.release(5);// 释放5个许可
+```
+
+除了 `acquire()` 方法之外，另一个比较常用的与之对应的方法是 `tryAcquire()` 方法，该方法如果获取不到许可就立即返回 false。
+
+[issue645 补充内容](https://github.com/Snailclimb/JavaGuide/issues/645)：
+
+> `Semaphore` 基于 AQS 实现，用于控制并发访问的线程数量，但它与共享锁的概念有所不同。`Semaphore` 的构造函数使用 `permits` 参数初始化 AQS 的 `state` 变量，该变量表示可用的许可数量。当线程调用 `acquire()` 方法尝试获取许可时，`state` 会原子性地减 1。如果 `state` 减 1 后大于 0，则 `acquire()` 成功返回，线程可以继续执行。如果 `state` 减 1 后小于等于 0，表示当前并发访问的线程数量已达到 `permits` 的限制，该线程会被放入 AQS 的等待队列并阻塞，**而不是自旋等待**。当其他线程完成任务并调用 `release()` 方法时，`state` 会原子性地加 1。`release()` 操作会唤醒 AQS 等待队列中的一个或多个阻塞线程。这些被唤醒的线程将再次尝试 `acquire()` 操作，竞争获取可用的许可。因此，`Semaphore` 通过控制许可数量来限制并发访问的线程数量，而不是通过自旋和共享锁机制。
+
+## 2、CountDownLatch （倒计时器）
+### 2.1、介绍
+
+`CountDownLatch` 允许 `count` 个线程阻塞在一个地方，直至所有线程的任务都执行完毕。
+
+`CountDownLatch` 是**一次性**的，计数器的值只能在构造方法中初始化一次，之后没有任何机制再次对其设置值，当 `CountDownLatch` 使用完毕后，它不能再次被使用。
+
+### 2.2、原理
+
+`CountDownLatch` 是共享锁的一种实现，它默认构造 AQS 的 `state` 值为 `count`。这个我们通过 `CountDownLatch` 的构造方法即可看出。
+
+```java
+public CountDownLatch(int count) {
+    if (count < 0) throw new IllegalArgumentException("count < 0");
+    this.sync = new Sync(count);
+}
+
+private static final class Sync extends AbstractQueuedSynchronizer {
+    Sync(int count) {
+        setState(count);
+    }
+  //...
+}
+```
+
+当线程调用 `countDown()` 时，其实使用了`tryReleaseShared`方法以 CAS 的操作来减少 `state`，直至 `state` 为 0 。当 `state` 为 0 时，表示所有的线程都调用了 `countDown` 方法，那么在 `CountDownLatch` 上等待的线程就会被唤醒并继续执行。
+
+```java
+public void countDown() {
+    // Sync 是 CountDownLatch 的内部类 , 继承了 AbstractQueuedSynchronizer
+    sync.releaseShared(1);
+}
+```
+
+`releaseShared`方法是 `AbstractQueuedSynchronizer` 中的默认实现。
+
+```java
+// 释放共享锁
+// 如果 tryReleaseShared 返回 true，就唤醒等待队列中的一个或多个线程。
+public final boolean releaseShared(int arg) {
+    // 释放共享锁
+    if (tryReleaseShared(arg)) {
+      //释放当前节点的后置等待节点
+      doReleaseShared();
+      return true;
+    }
+    return false;
+}
+```
+
+`tryReleaseShared` 方法是`CountDownLatch` 的内部类 `Sync` 重写的一个方法， `AbstractQueuedSynchronizer`中的默认实现仅仅抛出 `UnsupportedOperationException` 异常。
+
+```java
+// 对 state 进行递减，直到 state 变成 0；
+// 只有 count 递减到 0 时，countDown 才会返回 true
+protected boolean tryReleaseShared(int releases) {
+    // 自选检查 state 是否为 0
+    for (;;) {
+        int c = getState();
+        // 如果 state 已经是 0 了，直接返回 false
+        if (c == 0)
+            return false;
+        // 对 state 进行递减
+        int nextc = c-1;
+        // CAS 操作更新 state 的值
+        if (compareAndSetState(c, nextc))
+            return nextc == 0;
+    }
+}
+```
+
+以无参 `await`方法为例，当调用 `await()` 的时候，如果 `state` 不为 0，那就证明任务还没有执行完毕，`await()` 就会一直阻塞，也就是说 `await()` 之后的语句不会被执行（`main` 线程被加入到等待队列也就是 变体 CLH 队列中了）。然后，`CountDownLatch` 会自旋 CAS 判断 `state == 0`，如果 `state == 0` 的话，就会释放所有等待的线程，`await()` 方法之后的语句得到执行。
+
+```java
+// 等待（也可以叫做加锁）
+public void await() throws InterruptedException {
+    sync.acquireSharedInterruptibly(1);
+}
+// 带有超时时间的等待
+public boolean await(long timeout, TimeUnit unit)
+    throws InterruptedException {
+    return sync.tryAcquireSharedNanos(1, unit.toNanos(timeout));
+}
+```
+
+`acquireSharedInterruptibly` 方法是 `AbstractQueuedSynchronizer` 中的默认实现。
+
+```java
+// 尝试获取锁，获取成功则返回，失败则加入等待队列，挂起线程
+public final void acquireSharedInterruptibly(int arg)
+    throws InterruptedException {
+    if (Thread.interrupted())
+      throw new InterruptedException();
+        // 尝试获得锁，获取成功则返回
+    if (tryAcquireShared(arg) < 0)
+      // 获取失败加入等待队列，挂起线程
+      doAcquireSharedInterruptibly(arg);
+}
+```
+
+`tryAcquireShared` 方法是`CountDownLatch` 的内部类 `Sync` 重写的一个方法，其作用就是判断 `state` 的值是否为 0，是的话就返回 1，否则返回 -1。
+
+```java
+protected int tryAcquireShared(int acquires) {
+    return (getState() == 0) ? 1 : -1;
+}
+```
+
+### 2.3、实战
+
+**CountDownLatch 的两种典型用法**：
+
+1. 某一线程在开始运行前等待 n 个线程执行完毕 : 将 `CountDownLatch` 的计数器初始化为 n （`new CountDownLatch(n)`），每当一个任务线程**执行完毕**，就将计数器**减 1** （`countdownlatch.countDown()`），当计数器的值变为 0 时，在 `CountDownLatch 上 await()` 的线程就会被唤醒。一个典型应用场景就是启动一个服务时，主线程需要等待多个组件加载完毕，之后再继续执行。
+2. 实现多个线程开始执行任务的最大并行性：注意是并行性，不是并发，强调的是多个线程在某一时刻同时开始执行。类似于赛跑，将多个线程放到起点，等待发令枪响，然后同时开跑。做法是初始化一个共享的 `CountDownLatch` 对象，将其计数器初始化为 1 （`new CountDownLatch(1)`），多个线程在开始执行任务前首先 `coundownlatch.await()`，当主线程调用 `countDown()` 时，计数器变为 0，多个线程同时被唤醒。
+
+**CountDownLatch 代码示例1**：
+
+```java
+public class CountDownLatchExample1 {
+  // 请求的数量
+  private static final int THREAD_COUNT = 550;
+
+  public static void main(String[] args) throws InterruptedException {
+    // 创建一个具有固定线程数量的线程池对象（如果这里线程池的线程数量给太少的话你会发现执行的很慢）
+    // 只是测试使用，实际场景请手动赋值线程池参数
+    ExecutorService threadPool = Executors.newFixedThreadPool(300);
+    final CountDownLatch countDownLatch = new CountDownLatch(THREAD_COUNT);
+    for (int i = 0; i < THREAD_COUNT; i++) {
+      final int threadNum = i;
+      threadPool.execute(() -> {
+        try {
+          test(threadNum);
+        } catch (InterruptedException e) {
+          e.printStackTrace();
+        } finally {
+          // 表示一个请求已经被完成
+          countDownLatch.countDown();
+        }
+
+      });
+    }
+    countDownLatch.await();
+    threadPool.shutdown();
+    System.out.println("finish");
+  }
+
+  public static void test(int threadnum) throws InterruptedException {
+    Thread.sleep(1000);
+    System.out.println("threadNum:" + threadnum);
+    Thread.sleep(1000);
+  }
+}
+```
+
+上面的代码中，我们定义了请求的数量为 550，当这 550 个请求被处理完成之后，才会执行`System.out.println("finish");`。
+
+与 `CountDownLatch` 的第一次交互是主线程等待其他线程。主线程必须在启动其他线程后立即调用 `CountDownLatch.await()` 方法。这样主线程的操作就会在这个方法上阻塞，直到其他线程完成各自的任务。
+
+其他 N 个线程必须引用闭锁对象，因为他们需要通知 `CountDownLatch` 对象，他们已经完成了各自的任务。这种通知机制是通过 `CountDownLatch.countDown()`方法来完成的；每调用一次这个方法，在构造函数中初始化的 count 值就减 1。所以当 N 个线程都调 用了这个方法，count 的值等于 0，然后主线程就能通过 `await()`方法，恢复执行自己的任务。
+
+**CountDownLatch 代码示例2**：
+
+```java
+import java.util.concurrent.CountDownLatch;
+
+public class CountDownLatchExample2 {
+
+    private static final int THREAD_COUNT = 5;
+
+    public static void main(String[] args) throws InterruptedException {
+
+        // 发令枪（初始值为1）
+        CountDownLatch latch = new CountDownLatch(1);
+
+        // 运动员数量
+        ExecutorService threadPool = Executors.newFixedThreadPool(THREAD_COUNT);
+
+        for (int i = 0; i < THREAD_COUNT; i++) {
+            final int threadNum = i;
+            threadPool.execute(() -> {
+                System.out.println("运动员-" + threadNum + " 已经做好准备");
+                try {
+                    // 等待发令枪
+                    latch.await();
+
+                    System.out.println("运动员-" + threadNum + " 开始跑步");
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+
+        Thread.sleep(5000);
+        System.out.println("裁判准备完毕！");
+        Thread.sleep(1000);
+        System.out.println("裁判宣布：比赛开始！");
+        latch.countDown();
+
+        threadPool.shutdown();
+
+    }
+}
+
+```
+
+执行结果
+
+```java
+运动员-3 已经做好准备
+运动员-0 已经做好准备
+运动员-4 已经做好准备
+运动员-1 已经做好准备
+运动员-2 已经做好准备
+裁判准备完毕！
+裁判宣布：比赛开始！
+运动员-1 开始跑步
+运动员-4 开始跑步
+运动员-3 开始跑步
+运动员-0 开始跑步
+运动员-2 开始跑步
+```
+
+
+
+再插一嘴：`CountDownLatch` 的 `await()` 方法使用不当很容易产生**死锁**，比如我们上面代码中的 for 循环改为：
+
+```java
+for (int i = 0; i < THREAD_COUNT - 1; i++) {
+.......
+}
+```
+
+因为执行任务数为 `THREAD_COUNT - 1` ，最终主线程调用 `await()` 的时候，如果 `state` 不为 0，证明任务还没有执行完毕，`await()` 就会一直阻塞。
+
+## 3、CyclicBarrier(循环栅栏)
+
+### 3.1、介绍
+
+`CyclicBarrier` 和 `CountDownLatch` 非常类似，它也可以实现线程间的技术等待，但是它的功能比 `CountDownLatch` 更加复杂和强大。主要应用场景和 `CountDownLatch` 类似。
+
+> `CountDownLatch` 的实现是基于 AQS 的，而 `CyclicBarrier` 是基于 `ReentrantLock`(`ReentrantLock` 也属于 AQS 同步器)和 `Condition` 的。
+
+`CyclicBarrier` 的字面意思是可循环使用（Cyclic）的屏障（Barrier）。它要做的事情是：让一组线程到达一个屏障（也可以叫同步点）时被阻塞，直到最后一个线程到达屏障时，屏障才会开门，所有被屏障拦截的线程才会继续干活。
+
+### 3.2、原理
+
+`CyclicBarrier` 内部通过一个 `count` 变量作为计数器，`count` 的初始值为 `parties` 属性的初始化值，每当一个线程到了栅栏这里了，那么就将计数器减 1。如果 count 值为 0 了，表示这是这一代最后一个线程到达栅栏，就尝试执行我们构造方法中输入的任务。
+
+```java
+//每次拦截的线程数
+private final int parties;
+//计数器
+private int count;
+```
+
+下面我们结合源码来简单看看。
+
+1、`CyclicBarrier` 默认的构造方法是 `CyclicBarrier(int parties)`，其参数表示屏障拦截的线程数量，每个线程调用 `await()` 方法告诉 `CyclicBarrier` 我已经到达了屏障，然后当前线程被阻塞。
+
+```java
+public CyclicBarrier(int parties) {
+    this(parties, null);
+}
+
+// barrierAction 是等待线程数等于parties后，先执行的任务，然后放行parties个线程执行await()后续的任务
+public CyclicBarrier(int parties, Runnable barrierAction) {
+    if (parties <= 0) throw new IllegalArgumentException();
+    this.parties = parties;
+    this.count = parties;
+    this.barrierCommand = barrierAction;
+}
+```
+
+其中，`parties` 就代表了有拦截的线程的数量，当拦截的线程数量达到这个值的时候就打开栅栏，让所有线程通过。
+
+2、当调用 `CyclicBarrier` 对象调用 `await()` 方法时，实际上调用的是 `dowait(false, 0L)`方法。 `await()` 方法就像树立起一个栅栏的行为一样，将线程挡住了，当拦住的线程数量达到 `parties` 的值时，栅栏才会打开，线程才得以通过执行。
+
+```java
+public int await() throws InterruptedException, BrokenBarrierException {
+  try {
+      return dowait(false, 0L);
+  } catch (TimeoutException toe) {
+      throw new Error(toe); // cannot happen
+  }
+}
+```
+
+`dowait(false, 0L)`方法源码分析如下：
+
+```java
+    // 当线程数量或者请求数量达到 count 时 await 之后的方法才会被执行。上面的示例中 count 的值就为 5。
+    private int count;
+    /**
+     * Main barrier code, covering the various policies.
+     */
+    private int dowait(boolean timed, long nanos)
+        throws InterruptedException, BrokenBarrierException,
+               TimeoutException {
+        // 对象成员锁
+        final ReentrantLock lock = this.lock;
+        // 锁住
+        lock.lock();
+        try {
+            final Generation g = generation;
+
+            if (g.broken)
+                throw new BrokenBarrierException();
+
+            // 如果线程中断了，抛出异常
+            if (Thread.interrupted()) {
+                breakBarrier();
+                throw new InterruptedException();
+            }
+            // count 减1
+            int index = --count;
+            // 当 count 数量减为 0 之后说明最后一个线程已经到达栅栏了，也就是达到了可以执行await 方法之后的条件
+            if (index == 0) {  // tripped
+                boolean ranAction = false;
+                try {
+                    final Runnable command = barrierCommand;
+                    if (command != null)
+                        command.run();
+                    ranAction = true;
+                    // 将 count 重置为 parties 属性的初始化值
+                    // 唤醒之前等待的线程
+                    // 下一波执行开始
+                    nextGeneration();
+                    return 0;
+                } finally {
+                    if (!ranAction)
+                        breakBarrier();
+                }
+            }
+
+            // loop until tripped, broken, interrupted, or timed out
+            for (;;) {
+                try {
+                    if (!timed)
+                        trip.await();
+                    else if (nanos > 0L)
+                        nanos = trip.awaitNanos(nanos);
+                } catch (InterruptedException ie) {
+                    if (g == generation && ! g.broken) {
+                        breakBarrier();
+                        throw ie;
+                    } else {
+                        // We're about to finish waiting even if we had not
+                        // been interrupted, so this interrupt is deemed to
+                        // "belong" to subsequent execution.
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                if (g.broken)
+                    throw new BrokenBarrierException();
+
+                if (g != generation)
+                    return index;
+
+                if (timed && nanos <= 0L) {
+                    breakBarrier();
+                    throw new TimeoutException();
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+```
+
+### 3.3、实战
+
+示例 1：
+
+```java
+public class CyclicBarrierExample1 {
+  // 请求的数量
+  private static final int threadCount = 550;
+  // 需要同步的线程数量
+  private static final CyclicBarrier cyclicBarrier = new CyclicBarrier(5);
+
+  public static void main(String[] args) throws InterruptedException {
+    // 创建线程池
+    ExecutorService threadPool = Executors.newFixedThreadPool(10);
+
+    for (int i = 0; i < threadCount; i++) {
+      final int threadNum = i;
+      Thread.sleep(1000);
+      threadPool.execute(() -> {
+        try {
+          test(threadNum);
+        } catch (InterruptedException e) {
+          // TODO Auto-generated catch block
+          e.printStackTrace();
+        } catch (BrokenBarrierException e) {
+          // TODO Auto-generated catch block
+          e.printStackTrace();
+        }
+      });
+    }
+    threadPool.shutdown();
+  }
+
+  public static void test(int threadnum) throws InterruptedException, BrokenBarrierException {
+    System.out.println("threadnum:" + threadnum + "is ready");
+    try {
+      /**等待60秒，保证子线程完全执行结束*/
+      cyclicBarrier.await(60, TimeUnit.SECONDS);
+    } catch (Exception e) {
+      System.out.println("-----CyclicBarrierException------");
+    }
+    System.out.println("threadnum:" + threadnum + "is finish");
+  }
+
+}
+```
+
+运行结果，如下：
+
+```plain
+threadnum:0is ready
+threadnum:1is ready
+threadnum:2is ready
+threadnum:3is ready
+threadnum:4is ready
+threadnum:4is finish
+threadnum:0is finish
+threadnum:1is finish
+threadnum:2is finish
+threadnum:3is finish
+threadnum:5is ready
+threadnum:6is ready
+threadnum:7is ready
+threadnum:8is ready
+threadnum:9is ready
+threadnum:9is finish
+threadnum:5is finish
+threadnum:8is finish
+threadnum:7is finish
+threadnum:6is finish
+......
+```
+
+可以看到当线程数量也就是请求数量达到我们定义的 5 个的时候， `await()` 方法之后的方法才被执行。
+
+另外，`CyclicBarrier` 还提供一个更高级的构造函数 `CyclicBarrier(int parties, Runnable barrierAction)`，用于在线程到达屏障时，优先执行 `barrierAction`，方便处理更复杂的业务场景。
+
+示例 2：
+
+```java
+public class CyclicBarrierExample2 {
+  // 请求的数量
+  private static final int threadCount = 550;
+  // 需要同步的线程数量
+  private static final CyclicBarrier cyclicBarrier = new CyclicBarrier(5, () -> {
+    System.out.println("------当线程数达到之后，优先执行------");
+  });
+
+  public static void main(String[] args) throws InterruptedException {
+    // 创建线程池
+    ExecutorService threadPool = Executors.newFixedThreadPool(10);
+
+    for (int i = 0; i < threadCount; i++) {
+      final int threadNum = i;
+      Thread.sleep(1000);
+      threadPool.execute(() -> {
+        try {
+          test(threadNum);
+        } catch (InterruptedException e) {
+          // TODO Auto-generated catch block
+          e.printStackTrace();
+        } catch (BrokenBarrierException e) {
+          // TODO Auto-generated catch block
+          e.printStackTrace();
+        }
+      });
+    }
+    threadPool.shutdown();
+  }
+
+  public static void test(int threadnum) throws InterruptedException, BrokenBarrierException {
+    System.out.println("threadnum:" + threadnum + "is ready");
+    cyclicBarrier.await();
+    System.out.println("threadnum:" + threadnum + "is finish");
+  }
+
+}
+```
+
+运行结果，如下：
+
+```java
+threadnum:0is ready
+threadnum:1is ready
+threadnum:2is ready
+threadnum:3is ready
+threadnum:4is ready
+------当线程数达到之后，优先执行------
+threadnum:4is finish
+threadnum:0is finish
+threadnum:2is finish
+threadnum:1is finish
+threadnum:3is finish
+threadnum:5is ready
+threadnum:6is ready
+threadnum:7is ready
+threadnum:8is ready
+threadnum:9is ready
+------当线程数达到之后，优先执行------
+threadnum:9is finish
+threadnum:5is finish
+threadnum:6is finish
+threadnum:8is finish
+threadnum:7is finish
+......
+```
+
+示例3：
+
+当发生 请求数量 不是 屏障数量 倍数的时候，会发生永久阻塞的问题（例如：550 个请求，barrier parties = 9，61组共549个线程正常分组通过，剩余1个线程永远卡在wawit()，因为CyclicBarrier 必须等够指定数量的线程）
+
+- 方案1：使用 await(timeout)
+
+  ```java
+  import java.util.concurrent.*;
+  
+  public class CyclicBarrierTimeoutDemo {
+  
+      public static void main(String[] args) {
+  
+          CyclicBarrier barrier = new CyclicBarrier(9);
+  
+          for (int i = 0; i < 10; i++) {
+  
+              int num = i;
+  
+              new Thread(() -> {
+  
+                  try {
+  
+                      System.out.println(num + " 到达屏障");
+  
+                      barrier.await(3, TimeUnit.SECONDS);
+  
+                      System.out.println(num + " 继续执行");
+  
+                  } catch (Exception e) {
+  
+                      System.out.println(num + " 等待超时");
+                  }
+  
+              }).start();
+          }
+      }
+  }
+  ```
+
+  
+
+- 方案2：动态计算最后一批数量
+
+  ```java
+  int batchSize = 9;
+  
+  int remain = total % batchSize;
+  
+  if (remain != 0) {
+      // 最后一批特殊处理
+  }
+  ```
+
+- **方案3：不要用 CyclicBarrier**
+
+  很多场景：
+
+  ```
+  本质并不适合 barrier
+  ```
+
+  例如：
+
+  ```
+  550 个 HTTP 请求
+  ```
+
+  实际上：
+
+  ```
+  你可能只是想控制并发量
+  ```
+
+  此时更适合：
+
+  - Semaphore
+  - 线程池
+  - CompletionService
+  - CountDownLatch
+
+  而不是：
+
+  ```
+  “必须每9个线程同时到达”
+  ```
+
+## 4、综合对比
+
+| 对比项             | Semaphore        | CountDownLatch | CyclicBarrier             |
+| ------------------ | ---------------- | -------------- | ------------------------- |
+| 中文               | 信号量           | 倒计时器       | 循环屏障                  |
+| AQS模式            | 共享模式         | 共享模式       | ReentrantLock + Condition |
+| 核心作用           | 控制并发线程数量 | 等待任务完成   | 多线程阶段同步            |
+| 是否可重复使用     | ✔ 可以           | ❌ 不可以       | ✔ 可以                    |
+| 是否会重置计数     | ✔ permit动态变化 | ❌ 到0后结束    | ✔ 自动重置                |
+| 是否限制线程进入   | ✔ 限制           | ❌ 不限制       | ❌ 不限制                  |
+| 是否需要固定线程数 | ❌ 不需要         | ❌ 不需要       | ✔ 必须                    |
+| 是否可能永久等待   | 一般不会         | 一般不会       | ✔ 容易发生                |
+| 典型场景           | 限流、连接池     | 等待初始化完成 | 分阶段并行计算            |
+
+**方法搭配对比（最重要）**
+
+| 工具           | 获取/等待 | 释放/通知            |
+| -------------- | --------- | -------------------- |
+| Semaphore      | acquire() | release()            |
+| CountDownLatch | await()   | countDown()          |
+| CyclicBarrier  | await()   | 最后一个线程自动触发 |

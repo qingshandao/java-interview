@@ -15,14 +15,14 @@ public class CyclicBarrierDemo1 {
         });
 
         // 2.多线程示例
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 30; i++) {
             int id = i;
             new Thread(() -> {
                 try {
                     System.out.println("线程 " + (id + 1) + " 执行第一阶段任务");
                     Thread.sleep(1000 * id);
 
-                    System.out.println("线程 " + (id + 1) + " 抵达平常，开始等待其它线程");
+                    System.out.println("线程 " + (id + 1) + " 抵达屏障，开始等待其它线程");
 
                     cyclicBarrier.await();
 
