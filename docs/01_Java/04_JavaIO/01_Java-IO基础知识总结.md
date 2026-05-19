@@ -677,6 +677,8 @@ Unicode 本身只是一种字符集，它为每个字符分配一个唯一的数
 
 `InputStreamReader` 是字节流转换为字符流的桥梁，其子类 `FileReader` 是基于该基础上的封装，可以直接操作字符文件。
 
+字符流更适合文本，以字符为单位处理，而不是字节。
+
 ```java
 // 字节流转换为字符流的桥梁
 public class InputStreamReader extends Reader {
@@ -774,7 +776,383 @@ public class Demo3 {
 }
 ```
 
+输出：
+
+```
+你好Java
+```
+
+**⚠为什么 FileReader 不推荐？**
+
+FileReader 无法指定编码，无法指定编码，使用的是系统默认编码。
+
+因此实际开发更推荐：
+
+```java
+new InputStreamReader(
+        new FileInputStream(file),
+        StandardCharsets.UTF_8
+)
+```
+
+## 2、Writer（字符输出流）
+
+`Writer`用于将数据（字符信息）写入到目的地（通常是文件），`java.io.Writer`抽象类是所有字符输出流的父类。
+
+`Writer` 常用方法：
+
+- `write(int c)` : 写入单个字符。
+- `write(char[] cbuf)`：写入字符数组 `cbuf`，等价于`write(cbuf, 0, cbuf.length)`。
+- `write(char[] cbuf, int off, int len)`：在`write(char[] cbuf)` 方法的基础上增加了 `off` 参数（偏移量）和 `len` 参数（要读取的最大字符数）。
+- `write(String str)`：写入字符串，等价于 `write(str, 0, str.length())` 。
+- `write(String str, int off, int len)`：在`write(String str)` 方法的基础上增加了 `off` 参数（偏移量）和 `len` 参数（要读取的最大字符数）。
+- `append(CharSequence csq)`：将指定的字符序列附加到指定的 `Writer` 对象并返回该 `Writer` 对象。
+- `append(char c)`：将指定的字符附加到指定的 `Writer` 对象并返回该 `Writer` 对象。
+- `flush()`：刷新此输出流并强制写出所有缓冲的输出字符。
+- `close()`:关闭输出流释放相关的系统资源。
+
+`OutputStreamWriter` 是字符流转换为字节流的桥梁，其子类 `FileWriter` 是基于该基础上的封装，可以直接将字符写入到文件。
+
+```java
+// 字符流转换为字节流的桥梁
+public class OutputStreamWriter extends Writer {
+}
+// 用于写入字符到文件
+public class FileWriter extends OutputStreamWriter {
+}
+```
+
+### 2.1、`OutputStreamWriter`
+
+`OutputStreamWriter` 负责：
+
+```
+char -> byte
+```
+
+Java中的字符串本质`char[]`，但文件中只能存`byte`，因此必须`字符 -> 字节`，这个过程称为 **编码（Encode）**
+
+```java
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
+
+public class Demo2 {
+
+    public static void main(String[] args) throws Exception {
+
+        // 字节流
+        FileOutputStream fos =
+                new FileOutputStream("test.txt");
+
+        // 转换成字符流
+        OutputStreamWriter osw =
+                new OutputStreamWriter(fos, "UTF-8");
+
+        // 写入字符
+        osw.write("你好Java");
+
+        // 刷新缓冲区
+        osw.flush();
+
+        osw.close();
+    }
+}
+```
+
+OutputStreamWriter 内部流程：
+
+```java
+字符
+   ↓
+按UTF-8编码
+   ↓
+转换成字节
+   ↓
+写入OutputStream
+```
+
+**为什么必须 flush()？**
+
+`OutputStreamWriter`  内部有缓冲区，调用`write()`数据可能先进入缓冲区，而不是立刻写入文件。`flush()`强制把缓冲区数据写出去。
+
+### 2.2、`FileWriter`
+
+`FileWriter` 本质是 `OutputStreamWriter` 的简化版，最大问题无法指定编码。
+
+`FileWriter` 代码示例：
+
+```java
+try (Writer output = new FileWriter("output.txt")) {
+    output.write("你好，我是Guide。");
+} catch (IOException e) {
+    e.printStackTrace();
+}
+```
 
 
 
+# 四、字节缓冲流
 
+IO 操作是很消耗性能的，缓冲流将数据加载至缓冲区，一次性读取/写入多个字节，从而避免频繁的 IO 操作，提高流的传输效率。
+
+字节缓冲流这里采用了装饰器模式来增强 `InputStream` 和`OutputStream`子类对象的功能。
+
+举个例子，我们可以通过 `BufferedInputStream`（字节缓冲输入流）来增强 `FileInputStream` 的功能。
+
+```java
+// 新建一个 BufferedInputStream 对象
+BufferedInputStream bufferedInputStream = new BufferedInputStream(new FileInputStream("input.txt"));
+```
+
+字节流和字节缓冲流的性能差别主要体现在我们使用两者的时候都是调用 `write(int b)` 和 `read()` 这两个一次只读取一个字节的方法的时候。由于字节缓冲流内部有缓冲区（字节数组），因此，字节缓冲流会先将读取到的字节存放在缓存区，大幅减少 IO 次数，提高读取效率。
+
+我使用 `write(int b)` 和 `read()` 方法，分别通过字节流和字节缓冲流复制一个 `524.9 mb` 的 PDF 文件耗时对比如下：
+
+```
+使用缓冲流复制PDF文件总耗时:15428 毫秒
+使用普通字节流复制PDF文件总耗时:2555062 毫秒
+```
+
+两者耗时差别非常大，缓冲流耗费的时间是字节流的 1/165。
+
+测试代码如下:
+
+```java
+@Test
+void copy_pdf_to_another_pdf_buffer_stream() {
+    // 记录开始时间
+    long start = System.currentTimeMillis();
+    try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream("深入理解计算机操作系统.pdf"));
+         BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream("深入理解计算机操作系统-副本.pdf"))) {
+        int content;
+        while ((content = bis.read()) != -1) {
+            bos.write(content);
+        }
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+    // 记录结束时间
+    long end = System.currentTimeMillis();
+    System.out.println("使用缓冲流复制PDF文件总耗时:" + (end - start) + " 毫秒");
+}
+
+@Test
+void copy_pdf_to_another_pdf_stream() {
+    // 记录开始时间
+    long start = System.currentTimeMillis();
+    try (FileInputStream fis = new FileInputStream("深入理解计算机操作系统.pdf");
+         FileOutputStream fos = new FileOutputStream("深入理解计算机操作系统-副本.pdf")) {
+        int content;
+        while ((content = fis.read()) != -1) {
+            fos.write(content);
+        }
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+    // 记录结束时间
+    long end = System.currentTimeMillis();
+    System.out.println("使用普通流复制PDF文件总耗时:" + (end - start) + " 毫秒");
+}
+```
+
+如果是调用 `read(byte b[])` 和 `write(byte b[], int off, int len)` 这两个写入一个字节数组的方法的话，只要字节数组的大小合适，两者的性能差距其实不大，基本可以忽略。
+
+这次我们使用 `read(byte b[])` 和 `write(byte b[], int off, int len)` 方法，分别通过字节流和字节缓冲流复制一个 524.9 mb 的 PDF 文件耗时对比如下：
+
+```
+使用缓冲流复制PDF文件总耗时:695 毫秒
+使用普通字节流复制PDF文件总耗时:989 毫秒
+```
+
+两者耗时差别不是很大，缓冲流的性能要略微好一点点。
+
+测试代码如下：
+
+```java
+@Test
+void copy_pdf_to_another_pdf_with_byte_array_buffer_stream() {
+    // 记录开始时间
+    long start = System.currentTimeMillis();
+    try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream("深入理解计算机操作系统.pdf"));
+         BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream("深入理解计算机操作系统-副本.pdf"))) {
+        int len;
+        byte[] bytes = new byte[4 * 1024];
+        while ((len = bis.read(bytes)) != -1) {
+            bos.write(bytes, 0, len);
+        }
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+    // 记录结束时间
+    long end = System.currentTimeMillis();
+    System.out.println("使用缓冲流复制PDF文件总耗时:" + (end - start) + " 毫秒");
+}
+
+@Test
+void copy_pdf_to_another_pdf_with_byte_array_stream() {
+    // 记录开始时间
+    long start = System.currentTimeMillis();
+    try (FileInputStream fis = new FileInputStream("深入理解计算机操作系统.pdf");
+         FileOutputStream fos = new FileOutputStream("深入理解计算机操作系统-副本.pdf")) {
+        int len;
+        byte[] bytes = new byte[4 * 1024];
+        while ((len = fis.read(bytes)) != -1) {
+            fos.write(bytes, 0, len);
+        }
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+    // 记录结束时间
+    long end = System.currentTimeMillis();
+    System.out.println("使用普通流复制PDF文件总耗时:" + (end - start) + " 毫秒");
+}
+```
+
+## 1、BufferedInputStream（字节缓冲输入流）
+
+`BufferedInputStream` 从源头（通常是文件）读取数据（字节信息）到内存的过程中不会一个字节一个字节的读取，而是会先将读取到的字节存放在缓存区，并从内部缓冲区中单独读取字节。这样大幅减少了 IO 次数，提高了读取效率。
+
+`BufferedInputStream` 内部维护了一个缓冲区，这个缓冲区实际就是一个字节数组，通过阅读 `BufferedInputStream` 源码即可得到这个结论。
+
+```java
+public
+class BufferedInputStream extends FilterInputStream {
+    // 内部缓冲区数组
+    protected volatile byte buf[];
+    // 缓冲区的默认大小
+    private static int DEFAULT_BUFFER_SIZE = 8192;
+    // 使用默认的缓冲区大小
+    public BufferedInputStream(InputStream in) {
+        this(in, DEFAULT_BUFFER_SIZE);
+    }
+    // 自定义缓冲区大小
+    public BufferedInputStream(InputStream in, int size) {
+        super(in);
+        if (size <= 0) {
+            throw new IllegalArgumentException("Buffer size <= 0");
+        }
+        buf = new byte[size];
+    }
+}
+```
+
+缓冲区的大小默认为 **8192** 字节，当然了，你也可以通过 `BufferedInputStream(InputStream in, int size)` 这个构造方法来指定缓冲区的大小。
+
+## 2、BufferedOutputStream（字节缓冲输出流）
+
+`BufferedOutputStream` 将数据（字节信息）写入到目的地（通常是文件）的过程中不会一个字节一个字节的写入，而是会先将要写入的字节存放在缓存区，并从内部缓冲区中单独写入字节。这样大幅减少了 IO 次数，提高了效率
+
+```java
+try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream("output.txt"))) {
+    byte[] array = "JavaGuide".getBytes();
+    bos.write(array);
+} catch (IOException e) {
+    e.printStackTrace();
+}
+```
+
+类似于 `BufferedInputStream` ，`BufferedOutputStream` 内部也维护了一个缓冲区，并且，这个缓存区的大小也是 **8192** 字节。
+
+# 五、字符缓冲流
+
+`BufferedReader` （字符缓冲输入流）和 `BufferedWriter`（字符缓冲输出流）类似于 `BufferedInputStream`（字节缓冲输入流）和`BufferedOutputStream`（字节缓冲输入流），内部都维护了一个字节数组作为缓冲区。不过，前者主要是用来操作字符信息。
+
+# 六、打印流
+
+下面这段代码大家经常使用吧？
+
+```java
+System.out.print("Hello！");
+System.out.println("Hello！");
+```
+
+`System.out` 实际是用于获取一个 `PrintStream` 对象，`print`方法实际调用的是 `PrintStream` 对象的 `write` 方法。
+
+`PrintStream` 属于字节打印流，与之对应的是 `PrintWriter` （字符打印流）。`PrintStream` 是 `OutputStream` 的子类，`PrintWriter` 是 `Writer` 的子类。
+
+```java
+public class PrintStream extends FilterOutputStream
+    implements Appendable, Closeable {
+}
+public class PrintWriter extends Writer {
+}
+```
+
+# 七、随机访问流
+
+这里要介绍的随机访问流指的是支持随意跳转到文件的任意位置进行读写的 `RandomAccessFile` 。
+
+`RandomAccessFile` 的构造方法如下，我们可以指定 `mode`（读写模式）。
+
+```java
+// openAndDelete 参数默认为 false 表示打开文件并且这个文件不会被删除
+public RandomAccessFile(File file, String mode)
+    throws FileNotFoundException {
+    this(file, mode, false);
+}
+// 私有方法
+private RandomAccessFile(File file, String mode, boolean openAndDelete)  throws FileNotFoundException{
+  // 省略大部分代码
+}
+```
+
+读写模式主要有下面四种：
+
+- `r` : 只读模式。
+- `rw`: 读写模式
+- `rws`: 相对于 `rw`，`rws` **同步更新**对“文件的内容”或“元数据”的修改到外部存储设备。
+- `rwd` : 相对于 `rw`，`rwd` **同步更新**对“文件的内容”的修改到外部存储设备。
+
+文件内容指的是文件中实际保存的数据，元数据则是用来描述文件属性比如文件的大小信息、创建和修改时间。
+
+`RandomAccessFile` 中有一个文件指针用来表示下一个将要被写入或者读取的字节所处的位置。我们可以通过 `RandomAccessFile` 的 `seek(long pos)` 方法来设置文件指针的偏移量（距文件开头 `pos` 个字节处）。如果想要获取文件指针当前的位置的话，可以使用 `getFilePointer()` 方法。
+
+`RandomAccessFile` 代码示例：
+
+```java
+RandomAccessFile randomAccessFile = new RandomAccessFile(new File("input.txt"), "rw");
+System.out.println("读取之前的偏移量：" + randomAccessFile.getFilePointer() + ",当前读取到的字符" + (char) randomAccessFile.read() + "，读取之后的偏移量：" + randomAccessFile.getFilePointer());
+// 指针当前偏移量为 6
+randomAccessFile.seek(6);
+System.out.println("读取之前的偏移量：" + randomAccessFile.getFilePointer() + ",当前读取到的字符" + (char) randomAccessFile.read() + "，读取之后的偏移量：" + randomAccessFile.getFilePointer());
+// 从偏移量 7 的位置开始往后写入字节数据
+randomAccessFile.write(new byte[]{'H', 'I', 'J', 'K'});
+// 指针当前偏移量为 0，回到起始位置
+randomAccessFile.seek(0);
+System.out.println("读取之前的偏移量：" + randomAccessFile.getFilePointer() + ",当前读取到的字符" + (char) randomAccessFile.read() + "，读取之后的偏移量：" + randomAccessFile.getFilePointer());
+```
+
+`input.txt` 文件内容：
+
+![](assets/image-20220421162050158.png)
+
+输出：
+
+```plain
+读取之前的偏移量：0,当前读取到的字符A，读取之后的偏移量：1
+读取之前的偏移量：6,当前读取到的字符G，读取之后的偏移量：7
+读取之前的偏移量：0,当前读取到的字符A，读取之后的偏移量：1
+```
+
+`input.txt` 文件内容变为 `ABCDEFGHIJK` 。
+
+`RandomAccessFile` 的 `write` 方法在写入对象的时候如果对应的位置已经有数据的话，会将其覆盖掉。
+
+```java
+RandomAccessFile randomAccessFile = new RandomAccessFile(new File("input.txt"), "rw");
+randomAccessFile.write(new byte[]{'H', 'I', 'J', 'K'});
+```
+
+假设运行上面这段程序之前 `input.txt` 文件内容变为 `ABCD` ，运行之后则变为 `HIJK` 。
+
+`RandomAccessFile` 比较常见的一个应用就是实现大文件的 **断点续传** 。何谓断点续传？简单来说就是上传文件中途暂停或失败（比如遇到网络问题）之后，不需要重新上传，只需要上传那些未成功上传的文件分片即可。分片（先将文件切分成多个文件分片）上传是断点续传的基础。
+
+`RandomAccessFile` 可以帮助我们合并文件分片，示例代码如下：
+
+![](assets/20210609164749122.png)
+
+在[《Java 面试指北》](https://javaguide.cn/zhuanlan/java-mian-shi-zhi-bei.html)中详细介绍了大文件的上传问题。
+
+![](assets/image-20220428104115362.png)
+
+`RandomAccessFile` 的实现依赖于 `FileDescriptor` (文件描述符) 和 `FileChannel` （内存映射文件）。
