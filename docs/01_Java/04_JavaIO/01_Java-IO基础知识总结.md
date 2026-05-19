@@ -641,5 +641,140 @@ output.writeObject(person);
 - 字符流是由 Java 虚拟机将字节转换得到的，这个过程还算是比较耗时。
 - 如果我们不知道编码类型就很容易出现乱码问题。
 
-乱码问题这个很容易就可以复现，我们只需要将上面提到的 `FileInputStream` 代码示例中的 `input.txt` 文件内容改为中文即可，原代码不需要改动。
+乱码问题这个很容易就可以复现，我们只需要将上面提到的 `FileInputStream` 代码示例中的 `input.txt` 文件内容改为**中文**即可，原代码不需要改动。
+
+![](./assets/image-20220419154632551.png)
+
+输出：
+
+```java
+Number of remaining bytes:9
+The actual number of bytes skipped:2
+The content read from file:§å®¶å¥½
+```
+
+可以很明显地看到读取出来的内容已经变成了乱码。
+
+因此，I/O 流就干脆提供了一个直接操作字符的接口，方便我们平时对字符进行流操作。如果音频文件、图片等媒体文件用字节流比较好，如果涉及到字符的话使用字符流比较好。
+
+字符流默认采用的是 `Unicode` 编码，我们可以通过构造方法自定义编码。
+
+Unicode 本身只是一种字符集，它为每个字符分配一个唯一的数字编号，并没有规定具体的存储方式。UTF-8、UTF-16、UTF-32 都是 Unicode 的编码方式，它们使用不同的字节数来表示 Unicode 字符。例如，UTF-8 :英文占 1 字节，中文占 3 字节。
+
+## 1、Reader（字符输入流）
+
+`Reader`用于从源头（通常是文件）读取数据（字符信息）到内存中，`java.io.Reader`抽象类是所有字符输入流的父类。
+
+`Reader` 用于读取文本， `InputStream` 用于读取原始字节。
+
+`Reader` 常用方法：
+
+- `read()` : 从输入流读取一个字符。
+- `read(char[] cbuf)` : 从输入流中读取一些字符，并将它们存储到字符数组 `cbuf`中，等价于 `read(cbuf, 0, cbuf.length)` 。
+- `read(char[] cbuf, int off, int len)`：在`read(char[] cbuf)` 方法的基础上增加了 `off` 参数（偏移量）和 `len` 参数（要读取的最大字符数）。
+- `skip(long n)`：忽略输入流中的 n 个字符 ,返回实际忽略的字符数。
+- `close()` : 关闭输入流并释放相关的系统资源。
+
+`InputStreamReader` 是字节流转换为字符流的桥梁，其子类 `FileReader` 是基于该基础上的封装，可以直接操作字符文件。
+
+```java
+// 字节流转换为字符流的桥梁
+public class InputStreamReader extends Reader {
+}
+// 用于读取字符文件
+public class FileReader extends InputStreamReader {
+}
+```
+
+### 1.1、`InputStreamReader` 
+
+**内部本质：**
+
+```
+读取字节
+    ↓
+按指定编码解码
+    ↓
+转换成字符
+```
+
+**示例代码**
+
+```java
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+
+public class Demo2 {
+
+    public static void main(String[] args) throws Exception {
+
+        // 字节流
+        FileInputStream fis =
+                new FileInputStream("test.txt");
+
+        // 指定编码, 转换成字符流
+        InputStreamReader isr =
+                new InputStreamReader(fis, "UTF-8");
+
+        int ch;
+
+        while ((ch = isr.read()) != -1) {
+
+            System.out.print((char) ch);
+        }
+
+        isr.close();
+    }
+}
+```
+
+输出：
+
+```
+你好Java
+```
+
+InputStreamReader 常见构造方法有：
+
+```java
+// 1.使用系统默认的编码格式
+InputStreamReader isr = new InputStreamReader(fis);
+
+// 2.指定编码格式
+InputStreamReader isr = new InputStreamReader(fis，"UTF-8");
+```
+
+
+
+### 1.2、`FileReader`
+
+`FileReader` 本质就是 `InputStreamReader` 的简化版，**无法指定**编码格式，使用的是系统默认的编码格式
+
+示例代码如下：
+
+```java
+import java.io.FileReader;
+
+public class Demo3 {
+
+    public static void main(String[] args) throws Exception {
+
+        FileReader reader =
+                new FileReader("test.txt");
+
+        int ch;
+
+        while ((ch = reader.read()) != -1) {
+
+            System.out.print((char) ch);
+        }
+
+        reader.close();
+    }
+}
+```
+
+
+
+
 
