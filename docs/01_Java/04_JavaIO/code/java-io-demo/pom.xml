@@ -63,7 +63,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>${spring-boot.version}</version>
                 <configuration>
-                    <mainClass>com.example.javaiodemo.JavaIoDemoApplication</mainClass>
+                    <mainClass>com.javaiodemo.JavaIoDemoApplication</mainClass>
                     <skip>true</skip>
                 </configuration>
                 <executions>
