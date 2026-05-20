@@ -208,3 +208,101 @@ static final class RunnableAdapter<T> implements Callable<T> {
 ```java
 InputStream is = Files.newInputStream(Paths.get(generatorLogoPath))
 ```
+
+# 四、观察者模式
+
+NIO 中的文件目录监听服务使用到了观察者模式。
+
+NIO 中的文件目录监听服务基于 `WatchService` 接口和 `Watchable` 接口。`WatchService` 属于观察者，`Watchable` 属于被观察者。
+
+`Watchable` 接口定义了一个用于将对象注册到 `WatchService`（监控服务） 并绑定监听事件的方法 `register` 。
+
+```java
+public interface Path
+    extends Comparable<Path>, Iterable<Path>, Watchable{
+}
+
+public interface Watchable {
+    WatchKey register(WatchService watcher,
+                      WatchEvent.Kind<?>[] events,
+                      WatchEvent.Modifier... modifiers)
+        throws IOException;
+}
+```
+
+`WatchService` 用于监听文件目录的变化，同一个 `WatchService` 对象能够监听多个文件目录。
+
+```java
+// 创建 WatchService 对象
+WatchService watchService = FileSystems.getDefault().newWatchService();
+
+// 初始化一个被监控文件夹的 Path 类:
+Path path = Paths.get("workingDirectory");
+// 将这个 path 对象注册到 WatchService（监控服务） 中去
+WatchKey watchKey = path.register(
+watchService, StandardWatchEventKinds...);
+```
+
+`Path` 类 `register` 方法的第二个参数 `events` （需要监听的事件）为可变长参数，也就是说我们可以同时监听多种事件。
+
+
+
+```java
+WatchKey register(WatchService watcher,
+                  WatchEvent.Kind<?>... events)
+    throws IOException;
+```
+
+常用的监听事件有 3 种：
+
+- `StandardWatchEventKinds.ENTRY_CREATE`：文件创建。
+- `StandardWatchEventKinds.ENTRY_DELETE` : 文件删除。
+- `StandardWatchEventKinds.ENTRY_MODIFY` : 文件修改。
+
+`register` 方法返回 `WatchKey` 对象，通过`WatchKey` 对象可以获取事件的具体信息比如文件目录下是创建、删除还是修改了文件、创建、删除或者修改的文件的具体名称是什么。
+
+
+
+```java
+WatchKey key;
+while ((key = watchService.take()) != null) {
+    for (WatchEvent<?> event : key.pollEvents()) {
+      // 可以调用 WatchEvent 对象的方法做一些事情比如输出事件的具体上下文信息
+    }
+    key.reset();
+}
+```
+
+`WatchService` 内部是通过一个 daemon thread（守护线程）采用定期轮询的方式来检测文件的变化，简化后的源码如下所示。
+
+```java
+class PollingWatchService
+    extends AbstractWatchService
+{
+    // 定义一个 daemon thread（守护线程）轮询检测文件变化
+    private final ScheduledExecutorService scheduledExecutor;
+
+    PollingWatchService() {
+        scheduledExecutor = Executors
+            .newSingleThreadScheduledExecutor(new ThreadFactory() {
+                 @Override
+                 public Thread newThread(Runnable r) {
+                     Thread t = new Thread(r);
+                     t.setDaemon(true);
+                     return t;
+                 }});
+    }
+
+  void enable(Set<? extends WatchEvent.Kind<?>> events, long period) {
+    synchronized (this) {
+      // 更新监听事件
+      this.events = events;
+
+        // 开启定期轮询
+      Runnable thunk = new Runnable() { public void run() { poll(); }};
+      this.poller = scheduledExecutor
+        .scheduleAtFixedRate(thunk, period, period, TimeUnit.SECONDS);
+    }
+  }
+}
+```
